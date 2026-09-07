@@ -11,12 +11,12 @@
   ],
   "dependencies": [
     "ffmpeg",
-    "file_upload"
+    "file_upload",
+    "http"
   ],
   "codeowners": [
     "@lollox80"
   ],
   "documentation": "https://github.com/lollox80/ha-vimar-intercom/blob/main/README.md",
-  "issue_tracker": "https://github.com/lollox80/ha-vimar-intercom/issues",
-  "homeassistant": "2024.1.0"
+  "issue_tracker": "https://github.com/lollox80/ha-vimar-intercom/issues"
 }
