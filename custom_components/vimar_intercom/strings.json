@@ -104,8 +104,8 @@
       "invalid_ip": "Indirizzo IP non valido.",
       "sip_registration_failed": "Registrazione SIP fallita.",
       "invalid_actuators": "Lista attuatori non valida: {actuators_error}",
-      "rubrica_import_failed": "Importazione fallita: {rubrica_error}",
-      "rubrica_no_actuators": "{rubrica_error}",
+      "rubrica_import_failed": "Importazione fallita. Vedi il dettaglio nella descrizione.",
+      "rubrica_no_actuators": "Nessun attuatore trovato per il GID specificato. Vedi la descrizione.",
       "invalid_target": "Valore non valido: usa solo cifre (es. 55001)."
     }
   },

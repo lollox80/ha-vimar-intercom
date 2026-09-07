@@ -104,8 +104,8 @@
       "invalid_ip": "Invalid IP address.",
       "sip_registration_failed": "SIP registration failed.",
       "invalid_actuators": "Invalid actuators list: {actuators_error}",
-      "rubrica_import_failed": "Import failed: {rubrica_error}",
-      "rubrica_no_actuators": "{rubrica_error}",
+      "rubrica_import_failed": "Import failed. See description above for details.",
+      "rubrica_no_actuators": "No actuators found for the specified GID. See description above.",
       "invalid_target": "Invalid value: digits only (e.g. 55001)."
     }
   },
