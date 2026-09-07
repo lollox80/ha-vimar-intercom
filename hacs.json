@@ -1,0 +1,8 @@
+{
+  "name": "Vimar Intercom",
+  "description": "Integrazione Home Assistant per videocitofoni Vimar Elvox (2F/IP/2FV2) via stack SIP custom: apri porta, segreteria/DND, attuatori, camera on-demand. UDP locale o TLS cloud.",
+  "content_in_root": false,
+  "homeassistant": "2024.1.0",
+  "iot_class": "local_push",
+  "render_readme": true
+}

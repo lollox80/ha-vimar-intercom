@@ -1,0 +1,177 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Vimar Intercom",
+        "description": "Aggiungi il videocitofono Vimar Elvox. Le credenziali SIP sono integrate."
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Impostazioni Vimar Intercom",
+        "menu_options": {
+          "settings": "Impostazioni di rete e attuatori",
+          "import_rubrica": "Importa attuatori da rubrica.db"
+        }
+      },
+      "settings": {
+        "title": "Impostazioni Vimar Intercom",
+        "description": "Rete SIP e attuatori dinamici. Nel campo Attuatori incolla la lista JSON prodotta da tools/parse_rubrica.py, oppure torna al menu e usa \"Importa attuatori da rubrica.db\". {actuators_error}",
+        "data": {
+          "local_proxy": "IP del citofono",
+          "use_local_udp": "Usa SIP UDP locale",
+          "local_udp_port": "Porta UDP locale",
+          "media_enc": "Cifra il media (SRTP)",
+          "actuators": "Attuatori (JSON)",
+          "sga_target": "SGA (id SIP citofono/AUTO)",
+          "picg_target": "PICG (id SIP GET_INIT_STATUS)"
+        },
+        "data_description": {
+          "media_enc": "Lascia disattivato per RTP in chiaro (default, richiesto dalla maggior parte degli impianti Vimar 2F). Attiva solo se la targa/impianto richiede SRTP.",
+          "actuators": "Lista JSON di oggetti name, msg, target, icon. icon: door|light|switch. target \"AUTO\" usa la targa di default dell'apri-porta. Vuoto = nessun bottone.",
+          "sga_target": "Destinatario di VOICEMAIL;/DND; e dell'apri-porta AUTO. Vuoto = default storico (55001). Cambialo solo se il tuo impianto usa un altro SGA (SYSTEM.MAGIC_APT_INTERCOM in rubrica.db).",
+          "picg_target": "Destinatario di GET_INIT_STATUS. Sugli impianti verificati finora coincide con l'SGA. Vuoto = default storico (55001)."
+        }
+      },
+      "import_rubrica": {
+        "title": "Importa da rubrica.db",
+        "description": "Carica il file rubrica.db estratto dall'impianto (vedi docs/RUBRICA.md): l'integrazione ne ricava automaticamente gli attuatori del tuo appartamento, senza copiare a mano l'output di tools/parse_rubrica.py. Il file viene letto in sola lettura e non viene conservato da Home Assistant dopo l'importazione. {rubrica_error}",
+        "data": {
+          "rubrica_file": "File rubrica.db",
+          "rubrica_gid": "GID appartamento"
+        },
+        "data_description": {
+          "rubrica_gid": "Il GID dell'appartamento nella rubrica (di solito quello già in uso, es. 101)."
+        }
+      },
+      "import_confirm": {
+        "title": "Conferma importazione",
+        "description": "Trovati {count} attuatori per il GID {gid}: {names}.\n\nSGA (MAGIC_APT_INTERCOM) rilevato: {sga_info}\n\nConfermando, questa lista SOSTITUISCE gli attuatori attualmente configurati e, se rilevato, aggiorna sga_target/picg_target. Per annullare, chiudi questa finestra senza confermare."
+      }
+    },
+    "error": {
+      "invalid_ip": "Indirizzo IP non valido.",
+      "sip_registration_failed": "Registrazione SIP fallita.",
+      "invalid_actuators": "Lista attuatori non valida: {actuators_error}",
+      "rubrica_import_failed": "Importazione fallita: {rubrica_error}",
+      "rubrica_no_actuators": "{rubrica_error}",
+      "invalid_target": "Valore non valido: usa solo cifre (es. 55001)."
+    }
+  },
+  "entity": {
+    "camera": {
+      "videocitofono": {
+        "name": "Videocitofono"
+      }
+    },
+    "lock": {
+      "serratura": {
+        "name": "Serratura"
+      }
+    },
+    "button": {
+      "chiama": {
+        "name": "Chiama"
+      },
+      "riaggancia": {
+        "name": "Riaggancia"
+      }
+    },
+    "event": {
+      "campanello": {
+        "name": "Campanello"
+      },
+      "fuoriporta": {
+        "name": "Fuoriporta"
+      }
+    },
+    "binary_sensor": {
+      "registrazione_sip": {
+        "name": "Registrazione SIP"
+      },
+      "in_chiamata": {
+        "name": "In Chiamata"
+      },
+      "nuovo_videomessaggio": {
+        "name": "Nuovo Videomessaggio"
+      }
+    },
+    "sensor": {
+      "spazio_segreteria": {
+        "name": "Spazio Segreteria"
+      },
+      "versione_rubrica": {
+        "name": "Versione Rubrica"
+      },
+      "ultima_chiamata_persa": {
+        "name": "Ultima Chiamata Persa"
+      }
+    },
+    "switch": {
+      "segreteria": {
+        "name": "Segreteria"
+      },
+      "dnd": {
+        "name": "Non Disturbare"
+      }
+    }
+  },
+  "services": {
+    "send_command": {
+      "name": "Invia comando SIP",
+      "description": "Invia un SIP MESSAGE arbitrario al citofono (test comandi).",
+      "fields": {
+        "body": {
+          "name": "Comando",
+          "description": "Testo del comando, es. OPEN_2F"
+        },
+        "target": {
+          "name": "Destinatario",
+          "description": "ID SIP o URI"
+        },
+        "header_name": {
+          "name": "Header (nome)",
+          "description": "Header SIP extra"
+        },
+        "header_value": {
+          "name": "Header (valore)",
+          "description": "Valore header SIP extra"
+        }
+      }
+    },
+    "call": {
+      "name": "Chiama",
+      "description": "Avvia una chiamata verso una targa/monitor.",
+      "fields": {
+        "target": {
+          "name": "Destinatario",
+          "description": "ID SIP"
+        }
+      }
+    },
+    "answer": {
+      "name": "Rispondi",
+      "description": "Risponde alla chiamata in arrivo."
+    },
+    "hangup": {
+      "name": "Riaggancia",
+      "description": "Termina la chiamata attiva."
+    },
+    "open_door": {
+      "name": "Apri porta",
+      "description": "Invia il comando di apertura alla targa.",
+      "fields": {
+        "target": {
+          "name": "Targa",
+          "description": "ID SIP targa"
+        },
+        "command": {
+          "name": "Comando",
+          "description": "Comando di apertura"
+        }
+      }
+    }
+  }
+}

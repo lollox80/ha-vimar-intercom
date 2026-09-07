@@ -1,0 +1,96 @@
+send_command:
+  name: Invia comando SIP
+  description: >-
+    Invia un SIP MESSAGE arbitrario al citofono Vimar (es. OPEN_2F con header
+    "Panda: command"). Utile per sperimentare comandi non ancora mappati.
+  fields:
+    body:
+      name: Comando (body)
+      description: Testo del comando, es. OPEN_2F
+      required: true
+      example: OPEN_2F
+      selector:
+        text:
+    target:
+      name: Destinatario
+      description: ID SIP (55001 targa esterna, 55002 targa interna, 60001 monitor) o URI sip completo
+      default: "55001"
+      example: "55001"
+      selector:
+        text:
+    header_name:
+      name: Header extra (nome)
+      description: Nome dell'header SIP aggiuntivo (vuoto per nessuno)
+      default: Panda
+      selector:
+        text:
+    header_value:
+      name: Header extra (valore)
+      default: command
+      selector:
+        text:
+
+call:
+  name: Chiama
+  description: Avvia una chiamata SIP verso una targa/monitor.
+  fields:
+    target:
+      name: Destinatario
+      description: ID SIP (default targa esterna 55001)
+      example: "55001"
+      selector:
+        text:
+
+answer:
+  name: Rispondi
+  description: Risponde alla chiamata in arrivo.
+
+hangup:
+  name: Riaggancia
+  description: Termina la chiamata attiva.
+
+open_door:
+  name: Apri porta
+  description: Invia il comando di apertura (OPEN_2F) alla targa indicata.
+  fields:
+    target:
+      name: Targa
+      default: "55001"
+      selector:
+        select:
+          options:
+            - label: Cancello (targa esterna 55001)
+              value: "55001"
+            - label: Portone (targa interna 55002)
+              value: "55002"
+          custom_value: true
+    command:
+      name: Comando
+      default: OPEN_2F
+      selector:
+        text:
+
+fetch_local:
+  name: Fetch HTTP locale
+  description: GET (Digest sipID/password) verso l'interfaccia locale del citofono (home mode).
+  fields:
+    path:
+      name: Path
+      required: true
+      example: rest/get_info.php?action=status
+      selector:
+        text:
+    save_as:
+      name: Salva come (in /config)
+      example: vimar_rubrica.db
+      selector:
+        text:
+    host:
+      name: Host (default proxy locale)
+      selector:
+        text:
+    scheme:
+      name: Schema
+      default: http
+      selector:
+        text:

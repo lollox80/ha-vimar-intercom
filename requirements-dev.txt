@@ -1,0 +1,4 @@
+pytest>=8
+ruff>=0.5
+pycryptodome>=3.19
+requests>=2.28

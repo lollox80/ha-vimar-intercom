@@ -1,0 +1,23 @@
+[project]
+name = "vimar-intercom-dev"
+version = "0.0.0"
+description = "Tooling di sviluppo per l'integrazione HA vimar_intercom (non è il pacchetto HA)"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q -m 'not live'"
+markers = ["live: richiede il Tab reale in rete (escluso di default)"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["_archive", "_backup_*", "_unz*", "_deploy_tmp", "_ha_backup", "apk", "vimar_intercom"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
