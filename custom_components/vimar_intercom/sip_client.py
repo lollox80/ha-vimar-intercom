@@ -270,7 +270,7 @@ async def connect():
                      R.LOCAL_PROXY, C.LOCAL_SIP_PORT)
     else:
         # ── TLS/TCP cloud mode ─────────────────────────────────────
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         ctx = await loop.run_in_executor(None, _create_ssl_context)
         # Il proxy cloud reale è pubblicato via DNS SRV (_sips._tcp.<cproxy>):
         # es. flexiprod1/2/3.ipvdes2.vimarsso.cloud:7042. <cproxy> stesso è un
@@ -333,7 +333,7 @@ async def send(msg: str):
     _LOGGER.debug("[SIP >>>] %s", first_line)
     try:
         if R.USE_LOCAL_UDP:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             async with lock:
                 await loop.sock_sendto(_udp_sock, msg.encode(), _udp_target)
         else:
@@ -484,7 +484,7 @@ async def _dispatch_message(raw: str):
 
 async def _udp_reader_task():
     """Loop di lettura per modalità UDP locale."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     _LOGGER.info("SIP UDP reader started")
     last_ping = time.time()
 
@@ -523,6 +523,11 @@ async def reader_task():
                 buf = b""
                 continue
             buf += chunk
+            if len(buf) > 1_000_000:  # guard: 1 MB max — evita OOM su messaggi malformati
+                _LOGGER.error("SIP TCP buffer overflow (>1 MB); reset connessione")
+                await reconnect()
+                buf = b""
+                continue
         except asyncio.TimeoutError:
             # Send CRLF keepalive (RFC 5626) to prevent proxy from
             # considering TLS connection stale
@@ -1123,7 +1128,7 @@ async def do_connect_profiles():
         return False, "No FCM token"
 
     import requests as req_lib
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     def _call(endpoint):
         return req_lib.post(
