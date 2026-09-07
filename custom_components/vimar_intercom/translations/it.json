@@ -4,7 +4,56 @@
       "user": {
         "title": "Vimar Intercom",
         "description": "Aggiungi il videocitofono Vimar Elvox. Le credenziali SIP sono integrate."
+      },
+      "qr": {
+        "title": "Scansiona il QR di abbinamento",
+        "description": "Incolla il testo del QR code di abbinamento stampato sulla scatola del citofono. In caso di errore: {error_detail}",
+        "data": {
+          "qr_text": "Testo QR"
+        },
+        "data_description": {
+          "qr_text": "Il contenuto testuale del QR code (es. ID=12345&PROXY=...)."
+        }
+      },
+      "manual": {
+        "title": "Credenziali SIP",
+        "description": "Inserisci le credenziali SIP del tuo citofono Vimar.",
+        "data": {
+          "sip_user": "ID SIP (utente)",
+          "sip_password": "Password SIP",
+          "sip_domain": "Dominio SIP",
+          "cloud_proxy": "Proxy cloud"
+        },
+        "data_description": {
+          "sip_user": "L'ID numerico SIP del tuo citofono.",
+          "sip_password": "La password SIP (visibile nel QR di abbinamento).",
+          "sip_domain": "Il dominio SIP del cloud Vimar (es. ipvdes.vimar.cloud).",
+          "cloud_proxy": "Il proxy SIP cloud. Default: ipvdes.vimar.cloud."
+        }
+      },
+      "network": {
+        "title": "Rete locale",
+        "description": "Inserisci l'IP locale del citofono. Sarà eseguito un test di registrazione SIP. Utente: {sip_user}@{sip_domain} — MAC: {mac}. In caso di errore: {error_detail}",
+        "data": {
+          "local_proxy": "IP citofono (proxy locale)",
+          "use_local_udp": "Usa UDP locale (consigliato)",
+          "local_udp_port": "Porta UDP locale"
+        },
+        "data_description": {
+          "local_proxy": "L'indirizzo IP locale del tuo citofono Vimar (es. 192.168.1.100).",
+          "use_local_udp": "Abilita la modalità UDP locale. Richiede che HA e il citofono siano sulla stessa rete.",
+          "local_udp_port": "Porta UDP usata da HA per il SIP locale. Default: 5060."
+        }
       }
+    },
+    "error": {
+      "qr_invalid": "QR non valido o non riconosciuto.",
+      "required": "Questo campo è obbligatorio.",
+      "invalid_ip": "Indirizzo IP non valido.",
+      "sip_registration_failed": "Registrazione SIP fallita. Verifica che l'IP del citofono sia corretto e raggiungibile da HA."
+    },
+    "abort": {
+      "already_configured": "Il dispositivo è già configurato."
     }
   },
   "options": {

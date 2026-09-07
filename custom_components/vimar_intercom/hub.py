@@ -271,12 +271,15 @@ class VimarIntercomHub:
                 _LOGGER.exception("State callback error")
         # Notify WS clients of state change
         if self._ws_broadcast_fn:
-            import asyncio
-            asyncio.ensure_future(self._ws_broadcast_fn({
+            task = asyncio.create_task(self._ws_broadcast_fn({
                 "type": "state",
                 "registered": sip.registered,
                 "in_call": sip.in_call,
             }))
+            task.add_done_callback(
+                lambda t: _LOGGER.error("WS state broadcast error: %s", t.exception())
+                if not t.cancelled() and t.exception() else None
+            )
 
     async def stream_opened(self, target: str | None = None):
         self._stream_viewers += 1

@@ -73,6 +73,12 @@ class VimarIntercomLock(LockEntity):
         else:
             _LOGGER.error("Door open failed: %s", msg)
 
+    async def async_will_remove_from_hass(self) -> None:
+        """Cancella il task di richiusura automatica se l'entità viene rimossa."""
+        if self._relock_task:
+            self._relock_task.cancel()
+            self._relock_task = None
+
     async def _auto_relock(self):
         await asyncio.sleep(5)
         self._is_locked = True

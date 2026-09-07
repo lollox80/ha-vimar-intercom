@@ -4,7 +4,56 @@
       "user": {
         "title": "Vimar Intercom",
         "description": "Add the Vimar Elvox video intercom. SIP credentials are built-in."
+      },
+      "qr": {
+        "title": "Scan pairing QR code",
+        "description": "Paste the text of the pairing QR code printed on the intercom box. On error: {error_detail}",
+        "data": {
+          "qr_text": "QR text"
+        },
+        "data_description": {
+          "qr_text": "The textual content of the QR code (e.g. ID=12345&PROXY=...)."
+        }
+      },
+      "manual": {
+        "title": "SIP credentials",
+        "description": "Enter the SIP credentials for your Vimar intercom.",
+        "data": {
+          "sip_user": "SIP ID (user)",
+          "sip_password": "SIP password",
+          "sip_domain": "SIP domain",
+          "cloud_proxy": "Cloud proxy"
+        },
+        "data_description": {
+          "sip_user": "The numeric SIP ID of your intercom.",
+          "sip_password": "The SIP password (visible in the pairing QR code).",
+          "sip_domain": "The Vimar cloud SIP domain (e.g. ipvdes.vimar.cloud).",
+          "cloud_proxy": "The cloud SIP proxy. Default: ipvdes.vimar.cloud."
+        }
+      },
+      "network": {
+        "title": "Local network",
+        "description": "Enter the local IP of the intercom. A SIP registration test will be performed. User: {sip_user}@{sip_domain} — MAC: {mac}. On error: {error_detail}",
+        "data": {
+          "local_proxy": "Intercom IP (local proxy)",
+          "use_local_udp": "Use local UDP (recommended)",
+          "local_udp_port": "Local UDP port"
+        },
+        "data_description": {
+          "local_proxy": "The local IP address of your Vimar intercom (e.g. 192.168.1.100).",
+          "use_local_udp": "Enable local UDP mode. Requires HA and the intercom to be on the same network.",
+          "local_udp_port": "UDP port used by HA for local SIP. Default: 5060."
+        }
       }
+    },
+    "error": {
+      "qr_invalid": "Invalid or unrecognized QR code.",
+      "required": "This field is required.",
+      "invalid_ip": "Invalid IP address.",
+      "sip_registration_failed": "SIP registration failed. Check that the intercom IP is correct and reachable from HA."
+    },
+    "abort": {
+      "already_configured": "Device is already configured."
     }
   },
   "options": {

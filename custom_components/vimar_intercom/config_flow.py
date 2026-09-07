@@ -226,7 +226,7 @@ async def _test_sip_registration(
         finally:
             sock.close()
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, _run)
 
 
