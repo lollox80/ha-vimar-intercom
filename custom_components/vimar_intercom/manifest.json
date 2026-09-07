@@ -1,22 +1,22 @@
 {
   "domain": "vimar_intercom",
   "name": "Vimar Intercom",
-  "version": "1.0.0",
-  "config_flow": true,
-  "integration_type": "hub",
-  "iot_class": "local_push",
-  "requirements": [
-    "pycryptodome>=3.19.0",
-    "requests>=2.28"
+  "codeowners": [
+    "@lollox80"
   ],
+  "config_flow": true,
   "dependencies": [
     "ffmpeg",
     "file_upload",
     "http"
   ],
-  "codeowners": [
-    "@lollox80"
-  ],
   "documentation": "https://github.com/lollox80/ha-vimar-intercom/blob/main/README.md",
-  "issue_tracker": "https://github.com/lollox80/ha-vimar-intercom/issues"
+  "integration_type": "hub",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/lollox80/ha-vimar-intercom/issues",
+  "requirements": [
+    "pycryptodome>=3.19.0",
+    "requests>=2.28"
+  ],
+  "version": "1.0.0"
 }
