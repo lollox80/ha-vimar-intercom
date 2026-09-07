@@ -1317,17 +1317,25 @@ async def handle_incoming_cancel(raw):
 
 
 async def request_processor():
+    def _fire(coro, name: str):
+        """Lancia un task e loga le eccezioni non gestite (evita eccezioni silenziate)."""
+        t = asyncio.create_task(coro)
+        t.add_done_callback(
+            lambda t, n=name: _LOGGER.error("%s handler error: %s", n, t.exception())
+            if not t.cancelled() and t.exception() else None
+        )
+
     while True:
         raw = await incoming_requests.get()
         kind, hdrs, body, first = _parse(raw)
         if kind == "INVITE":
-            asyncio.create_task(handle_incoming_invite(raw))
+            _fire(handle_incoming_invite(raw), "INVITE")
         elif kind == "CANCEL":
-            asyncio.create_task(handle_incoming_cancel(raw))
+            _fire(handle_incoming_cancel(raw), "CANCEL")
         elif kind == "BYE":
-            asyncio.create_task(handle_incoming_bye(raw))
+            _fire(handle_incoming_bye(raw), "BYE")
         elif kind == "OPTIONS":
-            asyncio.create_task(handle_incoming_options(raw))
+            _fire(handle_incoming_options(raw), "OPTIONS")
         elif kind == "MESSAGE":
             _LOGGER.debug("SIP MESSAGE body=%r from=%s", body, hdrs.get("from",""))
             # Cap generoso (era 200: troncava GET_INIT_STATUS_REPLY ~266B → perdeva dnd/voicemail).
