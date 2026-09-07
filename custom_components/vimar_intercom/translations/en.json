@@ -169,56 +169,56 @@
   },
   "services": {
     "send_command": {
-      "name": "Invia comando SIP",
-      "description": "Invia un SIP MESSAGE arbitrario al citofono (test comandi).",
+      "name": "Send SIP command",
+      "description": "Send an arbitrary SIP MESSAGE to the intercom (for testing commands).",
       "fields": {
         "body": {
-          "name": "Comando",
-          "description": "Testo del comando, es. OPEN_2F"
+          "name": "Command",
+          "description": "Command text, e.g. OPEN_2F"
         },
         "target": {
-          "name": "Destinatario",
-          "description": "ID SIP o URI"
+          "name": "Target",
+          "description": "SIP ID or URI"
         },
         "header_name": {
-          "name": "Header (nome)",
-          "description": "Header SIP extra"
+          "name": "Header (name)",
+          "description": "Extra SIP header name"
         },
         "header_value": {
-          "name": "Header (valore)",
-          "description": "Valore header SIP extra"
+          "name": "Header (value)",
+          "description": "Extra SIP header value"
         }
       }
     },
     "call": {
-      "name": "Chiama",
-      "description": "Avvia una chiamata verso una targa/monitor.",
+      "name": "Call",
+      "description": "Start a call to an entry panel or monitor.",
       "fields": {
         "target": {
-          "name": "Destinatario",
-          "description": "ID SIP"
+          "name": "Target",
+          "description": "SIP ID"
         }
       }
     },
     "answer": {
-      "name": "Rispondi",
-      "description": "Risponde alla chiamata in arrivo."
+      "name": "Answer",
+      "description": "Answer an incoming call."
     },
     "hangup": {
-      "name": "Riaggancia",
-      "description": "Termina la chiamata attiva."
+      "name": "Hang up",
+      "description": "End the active call."
     },
     "open_door": {
-      "name": "Apri porta",
-      "description": "Invia il comando di apertura alla targa.",
+      "name": "Open door",
+      "description": "Send the door-open command to the entry panel.",
       "fields": {
         "target": {
-          "name": "Targa",
-          "description": "ID SIP targa"
+          "name": "Entry panel",
+          "description": "Entry panel SIP ID"
         },
         "command": {
-          "name": "Comando",
-          "description": "Comando di apertura"
+          "name": "Command",
+          "description": "Door-open command"
         }
       }
     }
