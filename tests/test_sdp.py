@@ -49,9 +49,9 @@ def test_parse_sdp_plain_answer_no_crypto():
     """SDP di risposta della targa (RTP/AVP, senza crypto) → nessuna crypto_key."""
     answer = (
         "v=0\r\n"
-        "o=- 0 0 IN IP4 192.168.0.60\r\n"
+        "o=- 0 0 IN IP4 192.0.2.60\r\n"
         "s=baresip\r\n"
-        "c=IN IP4 192.168.0.60\r\n"
+        "c=IN IP4 192.0.2.60\r\n"
         "t=0 0\r\n"
         "m=audio 53304 RTP/AVP 0 8 101\r\n"
         "a=rtpmap:0 PCMU/8000\r\n"
@@ -63,7 +63,7 @@ def test_parse_sdp_plain_answer_no_crypto():
     )
     r = sip.parse_sdp(answer)
     assert r["audio"]["port"] == 53304
-    assert r["audio"]["ip"] == "192.168.0.60"
+    assert r["audio"]["ip"] == "192.0.2.60"
     assert "crypto_key" not in r["audio"]
     assert r["video"]["port"] == 9300
     assert "crypto_key" not in r["video"]
@@ -72,7 +72,7 @@ def test_parse_sdp_plain_answer_no_crypto():
 def test_parse_sdp_srtp_answer_extracts_key():
     answer = (
         "v=0\r\n"
-        "c=IN IP4 192.168.0.60\r\n"
+        "c=IN IP4 192.0.2.60\r\n"
         "m=audio 53304 RTP/SAVP 0\r\n"
         "a=rtpmap:0 PCMU/8000\r\n"
         "a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:AbCdEf0123456789AbCdEf0123456789AbCdEf01\r\n"

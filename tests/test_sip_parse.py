@@ -38,7 +38,7 @@ def test_parse_incoming_message_body():
     parsed = sip._parse(MSG_IN)
     code = parsed[0]
     hdrs = parsed[1]
-    assert code is None or code == 0 or not isinstance(code, int) or code < 100 or True  # richiesta, non risposta
+    assert code == "MESSAGE"  # _parse restituisce il metodo SIP per le request, non un intero
     assert hdrs.get("panda") == "blue"
     # il body deve essere disponibile in uno degli elementi restituiti
     assert any(isinstance(x, str) and "VOICEMAIL;ON" in x for x in parsed[2:]) or "VOICEMAIL;ON" in str(parsed)
