@@ -21,15 +21,32 @@ PARAM — vedi `docs/PROTOCOL.md` §4-bis), la rubrica si scarica con una sola r
 **senza telefono rootato, senza WSA, senza adb**:
 
 ```bash
-curl -sS --digest -u "<cdomain>:<token>" \
+curl -sS --digest -u "<cdomain-completo>:<token>" \
      -A "TOGA/2.4.0" \
-     "https://<cproxy>/phonebook/domains/<cdomain>/<rubrica_ver>" \
+     "https://<cproxy>/phonebook/domains/<cdomain-troncato>/<rubrica_ver>" \
      -o rubrica.db
+```
+
+⚠ **Il `cdomain` compare in due forme diverse nella stessa richiesta** — è il modo più facile di
+prendersi un 401 o un 404:
+
+| Dove | Forma | Esempio |
+|---|---|---|
+| username del Digest | `cdomain` **completo**, suffisso cloud incluso | `1234567890ab.FFFFFFFFFF.ipvdes.vimar.cloud` |
+| path dell'URL | `cdomain` **senza `.<cproxy>`** | `1234567890ab.FFFFFFFFFF` |
+| host dell'URL | solo il `cproxy` | `ipvdes.vimar.cloud` |
+
+In codice:
+
+```python
+path_domain = cdomain[:-(len(cproxy) + 1)] if cdomain.endswith("." + cproxy) else cdomain
+url = f"https://{cproxy}/phonebook/domains/{path_domain}/{rubrica_ver}"
+# Digest: username = cdomain completo, password = token
 ```
 
 | Valore | Dove si prende |
 |---|---|
-| `cdomain`, `cproxy` | QR di abbinamento decodificato (`cdomain` ha la forma `0123456789ab.FFFFFFFFFF<…>`) |
+| `cdomain`, `cproxy` | QR di abbinamento decodificato |
 | `token`, `rubrica_ver` | `GET_INIT_STATUS_REPLY` via SIP |
 
 Lo User-Agent conta: è quello che manda l'app VIEW.
