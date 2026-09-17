@@ -202,6 +202,13 @@ normale del keepalive. `_dispatch_message` ora riconosce i Call-ID con prefisso 
 a `DEBUG` invece che `WARNING`. Con questa fix + quella sopra, **non serve più** alcun filtro
 `logger:` in `configuration.yaml` per silenziare questi messaggi.
 
+**Limite noto**: il compromesso vale in entrambe le direzioni. Poiché il componente tiene il proprio
+logger a `DEBUG` e inoltra solo `WARNING` e oltre, impostare
+`logger: logs: custom_components.vimar_intercom: debug` in `configuration.yaml` **non** farà comparire
+le righe `DEBUG` di questo componente nel log di Home Assistant: si leggono da
+`/api/vimar_intercom/debug`. Rendere configurabile il livello inoltrato è nella lista delle cose da
+fare.
+
 Se aggiorni `__init__.py` o `sip_client.py` da una fonte esterna (non HACS, non versionato per
 questo componente), ricontrolla che entrambe le patch siano ancora presenti (vedi nota in
 *Installazione → Manuale*).

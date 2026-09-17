@@ -247,6 +247,12 @@ of the keepalive. `_dispatch_message` now recognises Call-IDs prefixed with `pin
 `DEBUG` instead. With this fix and the one above, **no** `logger:` filter in `configuration.yaml` is
 needed any more to silence these messages.
 
+**Known limitation**: the trade-off cuts both ways. Because the component keeps its own logger at
+`DEBUG` and forwards only `WARNING` and above, setting
+`logger: logs: custom_components.vimar_intercom: debug` in `configuration.yaml` will *not* put this
+component's `DEBUG` lines in the Home Assistant log — read them from
+`/api/vimar_intercom/debug` instead. Making the forwarded level configurable is on the list.
+
 If you update `__init__.py` or `sip_client.py` from an external source (not HACS, not versioned for
 this component), check that both patches are still in place — see the note under
 *Installation → Manual*.

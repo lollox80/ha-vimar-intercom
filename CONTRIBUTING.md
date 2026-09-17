@@ -73,8 +73,23 @@ open an issue first so we don't both build it.
 ## Logging
 
 `_LOGGER.debug` for SIP traffic, `_LOGGER.info` for user-facing events, never
-`print`. The integration keeps its own circular debug buffer so HA's log stays
-readable; don't bypass it.
+`print`. In a module, take your logger with `logging.getLogger(__name__)` and
+leave handlers and levels alone.
+
+One place breaks that rule on purpose: `__init__.py` raises the
+`custom_components.vimar_intercom` logger to `DEBUG` to fill the circular buffer
+behind `/api/vimar_intercom/debug`, sets `propagate = False` so those `DEBUG`
+lines don't flood Home Assistant's log, and forwards `WARNING` and above through
+a dedicated handler.
+
+Be aware of what that costs: the level a user sets under `logger:` in
+`configuration.yaml` is not authoritative below `WARNING`, so someone who
+actually wants this component's `DEBUG` lines in the HA log cannot have them —
+they have to read the buffer instead. That is a trade-off we made, not a rule to
+defend. A PR that gives the forward level back to the user — or that drops the
+buffer in favour of plain `logger:` — is welcome, as long as the default stays
+quiet: the bug this replaced filled one maintainer's log with hundreds of
+megabytes over six months.
 
 ## Reporting hardware compatibility
 
