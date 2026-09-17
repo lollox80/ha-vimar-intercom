@@ -10,12 +10,16 @@ L'inizializzazione avviene in __init__.py → async_setup_entry():
 
 from __future__ import annotations
 
+import hashlib as _hashlib
+
 from . import const as _const
 
 # ─── Valori di default (vuoti) ───────────────────────────────────────────────
 SIP_USER:     str = ""
 SIP_PASSWORD: str = ""
-SIP_DOMAIN:   str = ""
+SIP_DOMAIN:   str = ""   # dominio SIP attivo (locale o cloud, vedi configure)
+LOCAL_DOMAIN: str = ""   # dominio SIP locale del citofono (QR «domain»)
+CLOUD_DOMAIN: str = ""   # dominio SIP cloud Vimar (QR «cdomain»)
 SIP_HA1:      str = ""
 SIP_PROXY:    str = "ipvdes.vimar.cloud"   # cloud proxy (da QR cproxy)
 LOCAL_PROXY:  str = ""                      # IP citofono locale
@@ -69,6 +73,7 @@ def configure(data: dict) -> None:
     «data» è il dizionario salvato nel config entry da config_flow.
     """
     global SIP_USER, SIP_PASSWORD, SIP_DOMAIN, SIP_HA1
+    global LOCAL_DOMAIN, CLOUD_DOMAIN
     global SIP_PROXY, LOCAL_PROXY
     global GID, PLANT_TYPE, MAC_CITOFONO
     global USE_LOCAL_UDP, LOCAL_UDP_PORT, MEDIA_ENC
@@ -90,6 +95,31 @@ def configure(data: dict) -> None:
     USE_LOCAL_UDP  = bool(data.get("use_local_udp", True))
     LOCAL_UDP_PORT = int(data.get("local_udp_port", 5060))
     MEDIA_ENC      = bool(data.get("media_enc", False))
+
+    # ─── Scelta del dominio SIP attivo ───────────────────────────────────────
+    # Il QR porta due domini: «domain» (locale del Tab) e «cdomain» (cloud).
+    # In modalità cloud il dominio locale non è instradabile — su alcuni Tab 5S
+    # vale addirittura 127.0.0.1 — quindi va usato quello cloud, e viceversa.
+    # sip_domain resta il valore salvato dal config flow (o inserito a mano)
+    # ed è il fallback quando il dominio della modalità attiva non è noto.
+    LOCAL_DOMAIN = (data.get("local_domain") or "").strip()
+    CLOUD_DOMAIN = (data.get("cloud_domain") or "").strip()
+
+    if USE_LOCAL_UDP:
+        SIP_DOMAIN = LOCAL_DOMAIN or SIP_DOMAIN
+    else:
+        SIP_DOMAIN = CLOUD_DOMAIN or SIP_DOMAIN
+
+    # HA1 è precalcolato sul dominio salvato: se la modalità attiva ne usa uno
+    # diverso va ricalcolato, altrimenti il digest fallisce. sip_client sa già
+    # rifare HA1 sul realm del challenge, ma solo se ha la password in chiaro.
+    if SIP_DOMAIN != (data.get("sip_domain") or "").strip():
+        if SIP_PASSWORD:
+            SIP_HA1 = _hashlib.md5(
+                f"{SIP_USER}:{SIP_DOMAIN}:{SIP_PASSWORD}".encode()
+            ).hexdigest()
+        else:
+            SIP_HA1 = ""
 
     # Attuatori dinamici: lista già validata dall'options flow (o default vuoto).
     acts = data.get("actuators", [])

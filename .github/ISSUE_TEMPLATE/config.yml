@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question / general discussion
+    url: https://community.home-assistant.io/t/vimar-tab5s-up-2-wire-wifi-elvox-40515/833805
+    about: For questions and general chat about Vimar/Elvox intercoms in Home Assistant, use the Home Assistant Community thread.
