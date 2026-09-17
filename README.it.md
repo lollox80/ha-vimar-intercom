@@ -216,9 +216,11 @@ automation:
   `55001` sull'impianto di sviluppo). Inviati a qualunque altro indirizzo vengono ignorati in
   silenzio: azzeccare l'SGA è ciò che li fa funzionare — impostalo in Options o lascialo riempire
   dall'import di `rubrica.db`.
-- **Rubrica cloud**: serve un `token`. Alcuni impianti lo consegnano dentro il
-  `GET_INIT_STATUS_REPLY`; altri (compreso quello di sviluppo) rispondono senza, e lì il token va
-  ottenuto dal login OIDC dell'account. In nessuno dei due casi è ancora implementata.
+- **Rubrica cloud**: serve un `token`. Gli impianti che rispondono al `GET_INIT_STATUS` in forma lunga
+  lo consegnano direttamente, e a quel punto la rubrica si scarica con una sola richiesta autenticata —
+  vedi `docs/RUBRICA.md` §0, verificato su un 40515. Gli impianti che rispondono in forma corta
+  (compreso quello di sviluppo) non hanno il token, e lì resta l'estrazione manuale. Lo scaricamento
+  automatico non è ancora implementato ([#5](../../issues/5)).
 - **Attuatori By‑me** (es. luci scala di domotica By‑me): potrebbero non rispondere via SIP anche se elencati in rubrica.
 - **Lock**: nessun feedback fisico di stato (auto‑relock ottimistico dopo 5 s).
 - **Rubrica**: su impianti solo‑cloud va estratta una tantum (vedi `docs/RUBRICA.md`); l'import automatico via cloud dipende da un token provisionato dall'account.

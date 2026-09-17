@@ -216,9 +216,11 @@ automation:
   phonebook, `55001` on the plant used for development). Sent to any other address they are silently
   ignored, so getting the SGA right is what makes them work — set it in the options or let the
   `rubrica.db` import fill it in.
-- **Cloud phonebook**: needs a `token`. Some plants hand it over in the `GET_INIT_STATUS_REPLY`;
-  others (including the development plant) return a reply without it, and there the token has to come
-  from the account's OIDC login instead. Not implemented yet either way.
+- **Cloud phonebook**: needs a `token`. Plants that answer `GET_INIT_STATUS` with the long form hand it
+  over directly, and the phonebook can then be downloaded with a single authenticated request — see
+  `docs/RUBRICA.md` §0, verified on a 40515. Plants that answer with the short form (including the
+  development one) don't carry a token, and there the manual extraction is still the way. Fetching it
+  automatically isn't implemented yet ([#5](../../issues/5)).
 - **By-me actuators** (e.g. stair lights on By-me home automation): these may not respond over SIP even
   when they are listed in the phonebook.
 - **Lock**: no physical state feedback (optimistic auto-relock after 5 s).

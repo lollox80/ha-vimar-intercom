@@ -1,6 +1,6 @@
 # RUBRICA.md — La rubrica Vimar (`rubrica.db`): schema, estrazione, uso in HA
 
-**Aggiornato:** 19 agosto 2026.
+**Aggiornato:** 17 settembre 2026.
 
 La `rubrica.db` è il database SQLite che l'app VIEW / il Tab usano per sapere **chi chiamare**,
 **quali attuatori mostrare**, **con quale comando/target**, e **chi è l'SGA** (il destinatario dei
@@ -13,6 +13,35 @@ lista JSON da incollare nelle opzioni dell'integrazione.
 
 > **Nessuna credenziale in questo file.** Non riportare mai password SIP, `ha1`, token account,
 > IMEI o PIN del Tab. I comandi `adb`/`su` qui sotto sono generici.
+
+## 0. Via più semplice: scaricarla dal cloud con il `token` [VERIFICATO 17/09/2026]
+
+Se il tuo impianto risponde al `GET_INIT_STATUS` in **forma lunga** (con `token` e `rubrica_ver` fra i
+PARAM — vedi `docs/PROTOCOL.md` §4-bis), la rubrica si scarica con una sola richiesta autenticata,
+**senza telefono rootato, senza WSA, senza adb**:
+
+```bash
+curl -sS --digest -u "<cdomain>:<token>" \
+     -A "TOGA/2.4.0" \
+     "https://<cproxy>/phonebook/domains/<cdomain>/<rubrica_ver>" \
+     -o rubrica.db
+```
+
+| Valore | Dove si prende |
+|---|---|
+| `cdomain`, `cproxy` | QR di abbinamento decodificato (`cdomain` ha la forma `0123456789ab.FFFFFFFFFF<…>`) |
+| `token`, `rubrica_ver` | `GET_INIT_STATUS_REPLY` via SIP |
+
+Lo User-Agent conta: è quello che manda l'app VIEW.
+
+Il file scaricato è **identico a quello che l'app Android tiene in locale**, quindi si dà in pasto
+direttamente all'importer delle opzioni (o a `tools/parse_rubrica.py`) senza conversioni.
+
+Verificato da @CPietro su un impianto 40515/2FV2 in cloud (issue pubblica #5). **Su questo impianto non
+è applicabile**: la nostra reply è corta e il token non c'è — restano i metodi §3 e §3-bis.
+
+> Il `token` va trattato come la password SIP: mai nei log, mai nel repo, mai in un incolla pubblico.
+> Se lo pubblichi da qualche parte, considera compromessa la rubrica dell'impianto.
 
 ## 1. Come l'app la ottiene (dai sorgenti `com.vimar.vmsipsdk` decompilati) [APK]
 
