@@ -2,12 +2,37 @@
 Aggiunge la radice del repo a sys.path così `custom_components.vimar_intercom` è importabile."""
 from __future__ import annotations
 
+import importlib.machinery
 import sys
 import types
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+COMPONENT = ROOT / "custom_components" / "vimar_intercom"
 sys.path.insert(0, str(ROOT))
+
+
+def _stub_package(name: str, path: Path) -> types.ModuleType:
+    """Registra un package il cui corpo non viene mai eseguito.
+
+    `custom_components/vimar_intercom/__init__.py` importa aiohttp, Home
+    Assistant, l'hub e le view HTTP: importarlo per arrivare a un modulo puro
+    tirerebbe dentro tutto il componente. Con un package fittizio il cui
+    `__path__` punta alla cartella, `from custom_components.vimar_intercom
+    import runtime` risolve `runtime.py` normalmente — import relativi
+    compresi — senza che `__init__.py` giri mai.
+    """
+    module = types.ModuleType(name)
+    spec = importlib.machinery.ModuleSpec(name, loader=None, is_package=True)
+    spec.submodule_search_locations = [str(path)]
+    module.__path__ = [str(path)]
+    module.__spec__ = spec
+    sys.modules[name] = module
+    return module
+
+
+_parent = _stub_package("custom_components", COMPONENT.parent)
+_parent.vimar_intercom = _stub_package("custom_components.vimar_intercom", COMPONENT)
 
 
 def _mod(name: str, **attrs) -> types.ModuleType:

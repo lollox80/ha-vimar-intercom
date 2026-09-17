@@ -23,3 +23,21 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
+
+  tests:
+    name: pytest
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Le versioni di Python che Home Assistant usa oggi.
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements-dev.txt
+      # I test girano senza Home Assistant installato: conftest.py fornisce gli
+      # stub. I test marcati `live` (che richiedono il citofono in rete) sono
+      # esclusi dal marker in pyproject.toml.
+      - run: python -m pytest tests -q
