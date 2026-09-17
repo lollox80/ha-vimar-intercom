@@ -47,10 +47,13 @@ PN_TYPE   = "firebase"
 # ─── User-Agent — stesso dell'app originale per compatibilità Flexisip ─────────
 USER_AGENT = "TOGA_Googlesdk_gphone64_arm64_Android34/1.0|AppVer:2.4.0|ProtVer:1.0|"
 
-# ─── Identità dispositivo HA (non sensibile — non è un IMEI reale) ────────────
-MY_NAME     = "Home Assistant"
-DEVICE_IMEI = "351234567890123"   # fake IMEI statico — serve solo per l'header SIP
-DEVICE_UUID = DEVICE_IMEI
+# ─── Identità dispositivo HA ──────────────────────────────────────────────────
+# L'identità NON è una costante: viene generata una volta sola per installazione
+# (runtime.new_device_identity) e salvata nel config entry. Il cloud Vimar traccia
+# la registrazione per identità dispositivo, quindi due impianti che si presentano
+# con lo stesso Mobile-IMEI / +sip.instance si contendono la stessa registrazione.
+MY_NAME = "Home Assistant"
+DEVICE_ID_DIGITS = 15   # cifre del finto IMEI usato nell'header Mobile-IMEI
 
 # ─── Push notifications (opzionale — lascia vuoto per disabilitare) ───────────
 # Riempi solo se vuoi ricevere push Firebase/FCM su dispositivi Android.

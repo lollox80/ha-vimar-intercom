@@ -133,7 +133,7 @@ def _contact_hdr(include_pn=True):
     port = _my_port()
     if R.USE_LOCAL_UDP:
         contact = f"<sip:{R.SIP_USER}@{MY_IP}:{port}>"
-        contact += f';+sip.instance="<urn:uuid:{C.DEVICE_UUID}>"'
+        contact += f';+sip.instance="<urn:uuid:{R.DEVICE_UUID}>"'
         contact += ";expires=3600"
         return contact
     # TLS/cloud mode
@@ -146,7 +146,7 @@ def _contact_hdr(include_pn=True):
                         f";pn-call-str=IC_MSG;pn-call-snd=notes_of_the_optimistic.caf"
                         f";q=0.00;domain-name={R.SIP_DOMAIN}")
     contact = f"<{contact_uri}>"
-    contact += f';+sip.instance="<urn:uuid:{C.DEVICE_UUID}>"'
+    contact += f';+sip.instance="<urn:uuid:{R.DEVICE_UUID}>"'
     contact += f";expires={'5184000' if C.PN_TOKEN else '3600'}"
     return contact
 
@@ -728,7 +728,7 @@ async def do_register():
              f"CSeq: {seq} REGISTER\r\n"
              f"Contact: {_contact_hdr()}\r\n"
              f"User-Agent: {C.USER_AGENT}\r\n"
-             f"Mobile-IMEI: {C.DEVICE_IMEI}\r\n"
+             f"Mobile-IMEI: {R.DEVICE_IMEI}\r\n"
              f"MyName: {C.MY_NAME}\r\n"
              f"Supported: replaces,outbound,gruu\r\n"
              f"Allow: INVITE,ACK,BYE,CANCEL,OPTIONS,NOTIFY,INFO,MESSAGE,UPDATE\r\n")
@@ -782,7 +782,7 @@ async def do_system_message(target_uri, body_text, extra_headers=None):
              f"CSeq: {seq} MESSAGE\r\n"
              f"Contact: {_simple_contact()}\r\n"
              f"User-Agent: {C.USER_AGENT}\r\n"
-             f"Mobile-IMEI: {C.DEVICE_IMEI}\r\n"
+             f"Mobile-IMEI: {R.DEVICE_IMEI}\r\n"
              f"MyName: {C.MY_NAME}\r\n")
         if extra_headers:
             for k, v in extra_headers.items():
@@ -852,7 +852,7 @@ async def do_call(target=None):
              f"Call-ID: {cid}\r\n"
              f"CSeq: {seq} INVITE\r\n"
              f"Contact: {_simple_contact()}"
-             f';+sip.instance="<urn:uuid:{C.DEVICE_UUID}>"\r\n'
+             f';+sip.instance="<urn:uuid:{R.DEVICE_UUID}>"\r\n'
              f"User-Agent: {C.USER_AGENT}\r\n"
              f"Supported: replaces,outbound,gruu,timer\r\n"
              f"Allow: INVITE,ACK,BYE,CANCEL,OPTIONS,NOTIFY,INFO,MESSAGE,UPDATE\r\n"
@@ -860,7 +860,7 @@ async def do_call(target=None):
              f"Min-SE: 90\r\n")
         if auth:
             m += f"Proxy-Authorization: {auth}\r\n"
-        m += (f"Mobile-IMEI: {C.DEVICE_IMEI}\r\n"
+        m += (f"Mobile-IMEI: {R.DEVICE_IMEI}\r\n"
               f"MyName: {C.MY_NAME}\r\n"
               f"X-Call-ID: {vimar_callid}\r\n"
               f"Content-Type: application/sdp\r\n"
@@ -890,71 +890,79 @@ async def do_call(target=None):
     _LOGGER.debug("do_call: cid=%s, q id=%s, pending_keys=%s", cid[:24], id(q), list(pending_responses.keys())[:3])
     deadline = time.time() + 45
 
-    while time.time() < deadline:
-        _LOGGER.debug("do_call: waiting q.get (qsize=%d, cid_in_pending=%s, q_is_same=%s)",
-                       q.qsize(), cid in pending_responses, pending_responses.get(cid) is q)
-        try:
-            raw = await asyncio.wait_for(q.get(), timeout=3)
-        except asyncio.TimeoutError:
-            _LOGGER.debug("do_call: q.get timeout (qsize=%d)", q.qsize())
-            continue
+    try:
+        while time.time() < deadline:
+            _LOGGER.debug("do_call: waiting q.get (qsize=%d, cid_in_pending=%s, q_is_same=%s)",
+                           q.qsize(), cid in pending_responses, pending_responses.get(cid) is q)
+            try:
+                raw = await asyncio.wait_for(q.get(), timeout=3)
+            except asyncio.TimeoutError:
+                _LOGGER.debug("do_call: q.get timeout (qsize=%d)", q.qsize())
+                continue
 
-        code, hdrs, body, first = _parse(raw)
-        ttag = _tag(hdrs.get("to", ""))
-        _LOGGER.debug("do_call: response %s (body=%dB)", code, len(body) if body else 0)
+            code, hdrs, body, first = _parse(raw)
+            ttag = _tag(hdrs.get("to", ""))
+            _LOGGER.debug("do_call: response %s (body=%dB)", code, len(body) if body else 0)
 
-        if code in (100, 180, 183):
-            if code == 183 and body:
-                call_state["remote_sdp"] = parse_sdp(body)
-            continue
+            if code in (100, 180, 183):
+                if code == 183 and body:
+                    call_state["remote_sdp"] = parse_sdp(body)
+                continue
 
-        if code in (401, 407):
-            await send(_ack(ttag, cur_seq))
-            ch = hdrs.get("proxy-authenticate", "") or hdrs.get("www-authenticate", "")
-            if not ch:
+            if code in (401, 407):
+                await send(_ack(ttag, cur_seq))
+                ch = hdrs.get("proxy-authenticate", "") or hdrs.get("www-authenticate", "")
+                if not ch:
+                    pending_responses.pop(cid, None)
+                    _set_calling(False)
+                    return False, f"Auth vuoto ({code})"
+                auth = _make_auth("INVITE", target_uri, ch)
+                cur_seq = _next_cseq()
+                await send(_inv(auth=auth, seq=cur_seq))
+                continue
+
+            if 200 <= code < 300:
+                call_state["to_tag"] = ttag
+                raw_contact = hdrs.get("contact", "")
+                if "<" in raw_contact and ">" in raw_contact:
+                    call_state["remote_contact"] = raw_contact[raw_contact.index("<")+1:raw_contact.index(">")]
+                else:
+                    call_state["remote_contact"] = raw_contact
+                await send(_ack(ttag, cur_seq))
+
+                if body:
+                    remote = parse_sdp(body)
+                    call_state["remote_sdp"] = remote
+                    _LOGGER.info("SDP: audio=%s video=%s", remote.get('audio', {}), remote.get('video', {}))
+                    await media.setup_media(remote, _local_crypto_key, _local_video_crypto_key)
+
+                _set_in_call(True)
+                _set_calling(False)
+                await broadcast("call_started", "Connesso!")
+                # Request keyframe immediately — no delay
+                await send_keyframe_request()
+                pending_responses.pop(cid, None)
+                return True, "Connesso!"
+
+            if code >= 300:
+                _LOGGER.error("INVITE rejected: %d", code)
+                await send(_ack(ttag, cur_seq))
                 pending_responses.pop(cid, None)
                 _set_calling(False)
-                return False, f"Auth vuoto ({code})"
-            auth = _make_auth("INVITE", target_uri, ch)
-            cur_seq = _next_cseq()
-            await send(_inv(auth=auth, seq=cur_seq))
-            continue
+                reason = first.split(" ", 2)[2] if first.count(" ") >= 2 else str(code)
+                return False, f"{code} {reason}"
 
-        if 200 <= code < 300:
-            call_state["to_tag"] = ttag
-            raw_contact = hdrs.get("contact", "")
-            if "<" in raw_contact and ">" in raw_contact:
-                call_state["remote_contact"] = raw_contact[raw_contact.index("<")+1:raw_contact.index(">")]
-            else:
-                call_state["remote_contact"] = raw_contact
-            await send(_ack(ttag, cur_seq))
-
-            if body:
-                remote = parse_sdp(body)
-                call_state["remote_sdp"] = remote
-                _LOGGER.info("SDP: audio=%s video=%s", remote.get('audio', {}), remote.get('video', {}))
-                await media.setup_media(remote, _local_crypto_key, _local_video_crypto_key)
-
-            _set_in_call(True)
-            _set_calling(False)
-            await broadcast("call_started", "Connesso!")
-            # Request keyframe immediately — no delay
-            await send_keyframe_request()
-            pending_responses.pop(cid, None)
-            return True, "Connesso!"
-
-        if code >= 300:
-            _LOGGER.error("INVITE rejected: %d", code)
-            await send(_ack(ttag, cur_seq))
-            pending_responses.pop(cid, None)
-            _set_calling(False)
-            reason = first.split(" ", 2)[2] if first.count(" ") >= 2 else str(code)
-            return False, f"{code} {reason}"
-
-    pending_responses.pop(cid, None)
-    _set_calling(False)
-    _LOGGER.error("INVITE timeout (45s) for %s", target_uri)
-    return False, "Timeout (45s)"
+        pending_responses.pop(cid, None)
+        _set_calling(False)
+        _LOGGER.error("INVITE timeout (45s) for %s", target_uri)
+        return False, "Timeout (45s)"
+    finally:
+        # Ogni uscita dalla transazione — return, timeout o eccezione sollevata
+        # da parse_sdp()/setup_media() dopo il 200 OK — deve liberare la coda e
+        # azzerare `calling`: senza questo il flag resta True per sempre e la
+        # guardia a inizio funzione blocca ogni chiamata successiva.
+        pending_responses.pop(cid, None)
+        _set_calling(False)
 
 
 async def send_keyframe_request():

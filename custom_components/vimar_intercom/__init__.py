@@ -107,6 +107,17 @@ def _get_hub_from_hass(hass: HomeAssistant) -> VimarIntercomHub:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Vimar Intercom from a config entry."""
+    # Identità dispositivo: una per installazione, generata al primo avvio e
+    # salvata nell'entry. Fino alla 1.0.1 era una costante in const.py uguale per
+    # tutti: sul cloud Vimar la registrazione (e le push) sono associate
+    # all'identità, quindi due impianti con lo stesso valore si scalzano a
+    # vicenda. Gli entry già esistenti vengono migrati qui, in silenzio.
+    if not entry.data.get("device_imei") or not entry.data.get("device_uuid"):
+        identity = runtime.new_device_identity()
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, **identity})
+        _LOGGER.info("Identità dispositivo generata per questa installazione")
+
     # Popola il modulo runtime con i dati del config entry.
     # Le options (impostazioni rete modificate da OptionsFlow) sovrascrivono
     # i valori di default presenti in entry.data.

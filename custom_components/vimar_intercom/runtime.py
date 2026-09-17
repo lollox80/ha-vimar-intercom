@@ -11,6 +11,8 @@ L'inizializzazione avviene in __init__.py → async_setup_entry():
 from __future__ import annotations
 
 import hashlib as _hashlib
+import secrets as _secrets
+import uuid as _uuid
 
 from . import const as _const
 
@@ -57,6 +59,12 @@ PICG_TARGET: str = _const.PICG_TARGET
 INTERCOM:     str = ""   # sip:<SGA_TARGET>@<domain> — targa esterna citofono
 DOOR_ESTERNO: str = ""   # stesso target per comando apertura porta
 
+# ─── Identità dispositivo (per installazione, dal config entry) ──────────────
+# Popolati da configure() con i valori salvati nell'entry; __init__.py li genera
+# al primo avvio se mancano. Mai costanti: vedi nota in const.py.
+DEVICE_IMEI: str = ""
+DEVICE_UUID: str = ""
+
 # ─── Modello rilevato via SIP (vedi model_detect.py) ─────────────────────────
 # Popolato all'avvio dal config entry (ultimo valore rilevato) e aggiornato a
 # runtime appena il citofono si presenta con il suo User-Agent SIP.
@@ -64,6 +72,21 @@ DETECTED_MODEL:    str = ""   # es. "Elvox Tab 7S"
 DETECTED_FW:       str = ""   # versione firmware, se presente nello User-Agent
 DETECTED_UA:       str = ""   # User-Agent grezzo, per diagnostica
 DETECTED_PRIORITY: int = 99   # indice del pattern che ha rilevato il modello
+
+
+def new_device_identity() -> dict[str, str]:
+    """Genera l'identità dispositivo di questa installazione.
+
+    Va chiamata una volta sola e il risultato salvato nel config entry: il cloud
+    Vimar associa la registrazione (e le push) all'identità, quindi un valore
+    costante nel sorgente farebbe litigare fra loro installazioni diverse.
+    """
+    return {
+        "device_imei": "".join(
+            _secrets.choice("0123456789") for _ in range(_const.DEVICE_ID_DIGITS)
+        ),
+        "device_uuid": str(_uuid.UUID(bytes=_secrets.token_bytes(16), version=4)),
+    }
 
 
 def configure(data: dict) -> None:
@@ -81,6 +104,7 @@ def configure(data: dict) -> None:
     global DETECTED_MODEL, DETECTED_FW, DETECTED_UA, DETECTED_PRIORITY
     global ACTUATORS
     global SGA_TARGET, PICG_TARGET
+    global DEVICE_IMEI, DEVICE_UUID
 
     SIP_USER     = data.get("sip_user", "")
     SIP_PASSWORD = data.get("sip_password", "")
@@ -133,6 +157,17 @@ def configure(data: dict) -> None:
     # URI calcolati — devono essere aggiornati dopo SIP_DOMAIN e SGA_TARGET
     INTERCOM     = f"sip:{SGA_TARGET}@{SIP_DOMAIN}"
     DOOR_ESTERNO = f"sip:{SGA_TARGET}@{SIP_DOMAIN}"
+
+    # Identità dispositivo: salvata nell'entry al primo avvio. Se manca (entry
+    # creato da una versione precedente, o probe/test senza entry) se ne genera
+    # una effimera valida per questa sessione, così nessun percorso finisce per
+    # usare un valore condiviso fra installazioni diverse.
+    DEVICE_IMEI = (str(data.get("device_imei") or "")).strip()
+    DEVICE_UUID = (str(data.get("device_uuid") or "")).strip()
+    if not DEVICE_IMEI or not DEVICE_UUID:
+        fallback = new_device_identity()
+        DEVICE_IMEI = DEVICE_IMEI or fallback["device_imei"]
+        DEVICE_UUID = DEVICE_UUID or fallback["device_uuid"]
 
     # Modello rilevato in una sessione precedente: riparte da lì, così le
     # entità mostrano subito il valore giusto anche prima del primo dialogo SIP.
