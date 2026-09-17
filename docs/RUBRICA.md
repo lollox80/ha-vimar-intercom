@@ -70,7 +70,25 @@ Metodo usato (senza credenziali):
    (Il prefisso `<domain>` è il `CDOMAIN` dell'impianto.)
 4. **Non** copiare `linphonerc`/prefs nel repo: contengono `ha1` e device id.
 
+### 3-bis. Estrazione senza telefono rootato — VIEW su WSA (segnalato da @CPietro)
+
+Se non hai un muletto da rootare, si può installare l'app VIEW nel **WSA** (Windows Subsystem for
+Android) e tirare fuori il db con `adb` da lì: WSA espone un endpoint adb e, non essendo un device
+di produzione, l'accesso ai dati dell'app è molto più semplice. Il resto della procedura è identico
+al punto 3 (login con l'account Vimar, poi copia di `<domain>_rubrica.db`).
+
+Metodo riportato da @CPietro su un impianto 40515/2FV2 nel thread della
+[HA Community](https://community.home-assistant.io/t/vimar-tab5s-up-2-wire-wifi-elvox-40515/833805);
+non verificato direttamente su questo impianto. Vale la stessa regola del punto 4: `linphonerc` e le
+preferenze non escono da lì.
+
 ## 4. Perché su questo impianto le altre vie sono chiuse
+
+> ⚠ **Vale per questo impianto, non per tutti.** Su un 40515/2FV2 in cloud, @CPietro riceve
+> regolarmente le `GET_INIT_STATUS_REPLY`
+> (`[{"PARAM":"dnd","VALUE":"0"},{"PARAM":"voicemail","VALUE":"…"}]`) e i comandi di stato SIP
+> vengono accettati dal Tab. La porta 80 invece risulta chiusa anche lì. Vedi la sezione
+> *Compatibilità* del README.
 
 - **Home HTTP** (:80 del Tab): accetta il TCP ma non risponde (read timeout) — l'impianto è solo‑cloud, la home mode è disattivata.
 - **SIP `GET_INIT_STATUS`**: nessuna `GET_INIT_STATUS_REPLY` (manca un PICG che la generi lato SIP; il Tab fa solo 200‑ACK).

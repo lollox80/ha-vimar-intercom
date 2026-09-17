@@ -15,10 +15,38 @@ doorbell ring, open the door or gate, view the camera **on demand**, control **v
 > TLS** (SRV `_sips._tcp`). Video arrives **on demand** from the SIP call (H.264 RTP, decoded to MJPEG
 > through ffmpeg), not from an always-on RTSP stream.
 
-Tested on the **Elvox Tab 7S 2F+ WiFi (art. 40507)**. Other Vimar 2F/IP/2FV2 Tabs and plants should
-work as well (configuration comes from the pairing QR code).
+---
 
-Got it running on a different model? Please open a
+## Compatibility
+
+Developed on the **Elvox Tab 7S 2F+ WiFi (art. 40507)**. Other Vimar 2F / 2FV2 / IP Tabs should work
+too — the configuration comes from the pairing QR code — and the table below is what has actually been
+reported so far.
+
+| Model | Art. | Plant | Firmware | Connection | Status |
+|---|---|---|---|---|---|
+| Elvox Tab 7S 2F+ WiFi | 40507 | 2F | — | local UDP | Development platform: ring, call, answer/hang up, door open, on-demand video, actuators |
+| Elvox Tab 5S UP 2 Wire WiFi | 40515 | 2FV2 | 2.1.0203 | cloud TLS | Working, reported by @CPietro — see the notes below |
+| Elvox Tab 5S UP 2 Wire WiFi | 40515 | — | — | cloud TLS | Cloud registration working after the 1.0.1 fix, reported by @gtarraran992 ([#1](../../issues/1)) |
+
+**What differs between plants.** The two Tab 5S reports made one thing clear: *the SIP state commands
+are plant-dependent, not universal*.
+
+- On the 40515 / 2FV2 plant, **DND works** — the Tab accepts the command and the official VIEW app
+  even shows a notification. **Voicemail turns on but not off** (still under investigation). And
+  `GET_INIT_STATUS` **does** get a reply, e.g.
+  `GET_INIT_STATUS_REPLY;[{"PARAM":"dnd","VALUE":"0"},{"PARAM":"voicemail","VALUE":"…"}]`.
+- On the 40507 / 2F plant used for development, none of that happens: every state command returns a
+  bare 200 OK with no effect, and `GET_INIT_STATUS` is never answered. Packet captures there show the
+  VIEW app sending no SIP at all when you toggle voicemail — the Tab only *announces* its new state.
+
+So if the voicemail/DND switches do nothing on your plant, that is expected behaviour for some
+installations rather than a misconfiguration on your side.
+
+Cloud-mode plants also need their SGA/PICG addresses set to match their own numbering — the defaults
+come from the development plant. See the options table below and `docs/RUBRICA.md`.
+
+Got it running on a different model, or on the same one with different results? Please open a
 [hardware compatibility report](../../issues/new?template=compatibility_report.yml) — reports where
 everything just worked are as useful as the ones where something broke.
 
@@ -181,11 +209,14 @@ automation:
 
 ## Known limitations
 
-- **Cloud-only plants**: reading the initial state over SIP (`GET_INIT_STATUS`) gets no reply, and the
-  Tab's local HTTP interface (:80) may stay silent. Camera, actuators and voicemail still work over SIP.
-- **Voicemail / DND**: the *command* is sent to the **SGA** (`SYSTEM.MAGIC_APT_INTERCOM` in the
-  phonebook, `55001` on plants like the one tested). Configurable in the options (**SGA**/**PICG**) or
-  through the automatic `rubrica.db` import — see above.
+- **Cloud-only plants**: the Tab's local HTTP interface (:80) may accept the TCP connection and then
+  stay silent, so there is no local phonebook to read. Camera, actuators and door opening still work
+  over SIP. Reading the initial state with `GET_INIT_STATUS` depends on the plant: some answer with a
+  `GET_INIT_STATUS_REPLY`, others never do (see *Compatibility*).
+- **Voicemail / DND**: whether these can be *commanded* at all depends on the plant — see
+  *Compatibility* above. Where they work, the command goes to the **SGA**
+  (`SYSTEM.MAGIC_APT_INTERCOM` in the phonebook, `55001` on the plant used for development).
+  Configurable in the options (**SGA**/**PICG**) or through the automatic `rubrica.db` import.
 - **By-me actuators** (e.g. stair lights on By-me home automation): these may not respond over SIP even
   when they are listed in the phonebook.
 - **Lock**: no physical state feedback (optimistic auto-relock after 5 s).

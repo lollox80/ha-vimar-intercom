@@ -14,9 +14,39 @@ squillo, apri la porta/cancello, guarda la camera **su richiesta**, comanda **se
 > il **Flexisip locale sul Tab** (UDP :5060) o con il **cloud Vimar in TLS** (SRV `_sips._tcp`).
 > Il video arriva **on‑demand** dalla chiamata SIP (RTP H.264, decodifica ffmpeg → MJPEG), non da uno stream RTSP sempre attivo.
 
-Testato su **Elvox Tab 7S 2F+ WiFi (art. 40507)**. Altri Tab/impianti Vimar 2F/IP/2FV2 dovrebbero funzionare (config dal QR di abbinamento).
+---
 
-Se lo fai funzionare su un modello diverso, apri una
+## Compatibilità
+
+Sviluppata su **Elvox Tab 7S 2F+ WiFi (art. 40507)**. Anche gli altri Tab Vimar 2F / 2FV2 / IP
+dovrebbero funzionare — la configurazione arriva dal QR di abbinamento — e la tabella qui sotto
+riporta quello che è stato effettivamente segnalato finora.
+
+| Modello | Art. | Impianto | Firmware | Connessione | Stato |
+|---|---|---|---|---|---|
+| Elvox Tab 7S 2F+ WiFi | 40507 | 2F | — | UDP locale | Piattaforma di sviluppo: squillo, chiamata, rispondi/riaggancia, apri porta, video on-demand, attuatori |
+| Elvox Tab 5S UP 2 Wire WiFi | 40515 | 2FV2 | 2.1.0203 | TLS cloud | Funzionante, segnalato da @CPietro — vedi note sotto |
+| Elvox Tab 5S UP 2 Wire WiFi | 40515 | — | — | TLS cloud | Registrazione cloud OK dopo la fix 1.0.1, segnalato da @gtarraran992 ([#1](../../issues/1)) |
+
+**Cosa cambia da impianto a impianto.** Le due segnalazioni sui Tab 5S hanno chiarito una cosa: *i
+comandi di stato SIP dipendono dall'impianto, non sono universali*.
+
+- Sull'impianto 40515 / 2FV2 il **DND funziona**: il Tab accetta il comando e l'app ufficiale VIEW
+  mostra pure la notifica. La **segreteria si accende ma non si spegne** (in corso di verifica). E
+  `GET_INIT_STATUS` **riceve risposta**, es.
+  `GET_INIT_STATUS_REPLY;[{"PARAM":"dnd","VALUE":"0"},{"PARAM":"voicemail","VALUE":"…"}]`.
+- Sull'impianto 40507 / 2F usato per lo sviluppo non succede niente di tutto questo: ogni comando di
+  stato torna un 200 OK senza effetto e `GET_INIT_STATUS` non riceve mai risposta. Lì le catture di
+  rete mostrano che l'app VIEW non manda alcun SIP quando si toglie o mette la segreteria — il Tab si
+  limita ad *annunciare* il proprio nuovo stato.
+
+Quindi, se sul tuo impianto gli switch segreteria/DND non fanno nulla, è il comportamento atteso su
+alcune installazioni, non un errore di configurazione.
+
+Gli impianti in modalità cloud devono anche impostare SGA/PICG secondo la propria numerazione: i
+default vengono dall'impianto di sviluppo. Vedi la tabella delle opzioni più sotto e `docs/RUBRICA.md`.
+
+Se lo fai funzionare su un modello diverso, o sullo stesso con risultati diversi, apri una
 [segnalazione di compatibilità hardware](../../issues/new?template=compatibility_report.yml) — anche
 i casi in cui ha funzionato tutto al primo colpo sono utili quanto quelli in cui si è rotto qualcosa.
 
@@ -178,12 +208,14 @@ automation:
 
 ## Limiti noti
 
-- **Impianto solo‑cloud**: la lettura dello stato iniziale via SIP (`GET_INIT_STATUS`) non riceve
-  risposta e l'interfaccia HTTP locale del Tab (:80) può essere muta; camera/attuatori/segreteria
-  funzionano lo stesso via SIP.
-- **Segreteria/DND**: il *comando* funziona verso l'**SGA** (`SYSTEM.MAGIC_APT_INTERCOM` della rubrica,
-  `55001` su impianti come quello testato). Configurabile in Options (**SGA**/**PICG**) o via import
-  automatico di `rubrica.db` — vedi sopra.
+- **Impianto solo‑cloud**: l'interfaccia HTTP locale del Tab (:80) può accettare il TCP e poi restare
+  muta, quindi non c'è rubrica da leggere in locale; camera, attuatori e apri‑porta funzionano lo
+  stesso via SIP. La lettura dello stato iniziale con `GET_INIT_STATUS` dipende dall'impianto: alcuni
+  rispondono con un `GET_INIT_STATUS_REPLY`, altri mai (vedi *Compatibilità*).
+- **Segreteria/DND**: se siano *comandabili* dipende dall'impianto — vedi *Compatibilità* qui sopra.
+  Dove funzionano, il comando va verso l'**SGA** (`SYSTEM.MAGIC_APT_INTERCOM` della rubrica, `55001`
+  sull'impianto di sviluppo). Configurabile in Options (**SGA**/**PICG**) o via import automatico di
+  `rubrica.db`.
 - **Attuatori By‑me** (es. luci scala di domotica By‑me): potrebbero non rispondere via SIP anche se elencati in rubrica.
 - **Lock**: nessun feedback fisico di stato (auto‑relock ottimistico dopo 5 s).
 - **Rubrica**: su impianti solo‑cloud va estratta una tantum (vedi `docs/RUBRICA.md`); l'import automatico via cloud dipende da un token provisionato dall'account.
