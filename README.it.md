@@ -28,23 +28,24 @@ riporta quello che è stato effettivamente segnalato finora.
 | Elvox Tab 5S UP 2 Wire WiFi | 40515 | 2FV2 | 2.1.0203 | TLS cloud | Funzionante, segnalato da @CPietro — vedi note sotto |
 | Elvox Tab 5S UP 2 Wire WiFi | 40515 | — | — | TLS cloud | Registrazione cloud OK dopo la fix 1.0.1, segnalato da @gtarraran992 ([#1](../../issues/1)) |
 
-**Cosa cambia da impianto a impianto.** Le due segnalazioni sui Tab 5S hanno chiarito una cosa: *i
-comandi di stato SIP dipendono dall'impianto, non sono universali*.
+**Cosa cambia da impianto a impianto.** Le due segnalazioni sui Tab 5S, messe accanto all'impianto di
+sviluppo, portano alla stessa conclusione pratica: *conta l'indirizzo a cui mandi il comando, e quanto
+il Tab ti racconta di ritorno*.
 
-- Sull'impianto 40515 / 2FV2 il **DND funziona**: il Tab accetta il comando e l'app ufficiale VIEW
-  mostra pure la notifica. La **segreteria si accende ma non si spegne** (in corso di verifica). E
-  `GET_INIT_STATUS` **riceve risposta**, es.
-  `GET_INIT_STATUS_REPLY;[{"PARAM":"dnd","VALUE":"0"},{"PARAM":"voicemail","VALUE":"…"}]`.
-- Sull'impianto 40507 / 2F usato per lo sviluppo non succede niente di tutto questo: ogni comando di
-  stato torna un 200 OK senza effetto e `GET_INIT_STATUS` non riceve mai risposta. Lì le catture di
-  rete mostrano che l'app VIEW non manda alcun SIP quando si toglie o mette la segreteria — il Tab si
-  limita ad *annunciare* il proprio nuovo stato.
-
-Quindi, se sul tuo impianto gli switch segreteria/DND non fanno nulla, è il comportamento atteso su
-alcune installazioni, non un errore di configurazione.
-
-Gli impianti in modalità cloud devono anche impostare SGA/PICG secondo la propria numerazione: i
-default vengono dall'impianto di sviluppo. Vedi la tabella delle opzioni più sotto e `docs/RUBRICA.md`.
+- **I comandi di stato vanno all'SGA.** Sull'impianto di sviluppo (40507 / 2F) `VOICEMAIL;ON|OFF` e
+  `DND;ON|OFF` funzionano se inviati all'SGA — lì `55001`, preso da `SYSTEM.MAGIC_APT_INTERCOM` della
+  rubrica. Mandati altrove (l'indirizzo del Tab stesso, il gruppo appartamento, il vecchio default
+  `60001`) tornano un 200 OK senza effetto, o un 404. Se i tuoi switch sembrano morti, le opzioni
+  SGA/PICG sono la prima cosa da controllare — vedi la tabella delle opzioni più sotto.
+- **`GET_INIT_STATUS` risponde, ma con quantità di dettaglio diverse.** Sul 40507 la risposta è corta:
+  `rubrica_ver`, `vm_ver`, `vm_level`, `dnd`, `voicemail`. Sull'impianto 40515 / 2FV2 è il payload
+  completo — `dnd`, `voicemail`, `rubrica_ver`, `vm_ver`, `vm_level`, `vm_timeout`,
+  `vm_timeout_values`, `apt_names`, `GID`, `media_enc` e un `token`. Per questo l'integrazione legge
+  quello che trova e ignora quello che manca, invece di aspettarsi un insieme fisso.
+- **La cifratura media è un valore dell'impianto**, non un default globale: il 40515 dichiara
+  `media_enc: "srtp"`, mentre l'impianto di sviluppo rifiuta SRTP e lavora in RTP chiaro.
+- Ancora aperto sul 40515: **la segreteria si accende ma non si spegne**, in corso di verifica da chi
+  l'ha segnalato.
 
 Se lo fai funzionare su un modello diverso, o sullo stesso con risultati diversi, apri una
 [segnalazione di compatibilità hardware](../../issues/new?template=compatibility_report.yml) — anche
@@ -209,13 +210,15 @@ automation:
 ## Limiti noti
 
 - **Impianto solo‑cloud**: l'interfaccia HTTP locale del Tab (:80) può accettare il TCP e poi restare
-  muta, quindi non c'è rubrica da leggere in locale; camera, attuatori e apri‑porta funzionano lo
-  stesso via SIP. La lettura dello stato iniziale con `GET_INIT_STATUS` dipende dall'impianto: alcuni
-  rispondono con un `GET_INIT_STATUS_REPLY`, altri mai (vedi *Compatibilità*).
-- **Segreteria/DND**: se siano *comandabili* dipende dall'impianto — vedi *Compatibilità* qui sopra.
-  Dove funzionano, il comando va verso l'**SGA** (`SYSTEM.MAGIC_APT_INTERCOM` della rubrica, `55001`
-  sull'impianto di sviluppo). Configurabile in Options (**SGA**/**PICG**) o via import automatico di
-  `rubrica.db`.
+  muta, quindi non c'è rubrica da leggere in LAN; camera, attuatori, apri‑porta e i comandi di stato
+  funzionano lo stesso via SIP.
+- **Segreteria/DND**: si comandano attraverso l'**SGA** (`SYSTEM.MAGIC_APT_INTERCOM` della rubrica,
+  `55001` sull'impianto di sviluppo). Inviati a qualunque altro indirizzo vengono ignorati in
+  silenzio: azzeccare l'SGA è ciò che li fa funzionare — impostalo in Options o lascialo riempire
+  dall'import di `rubrica.db`.
+- **Rubrica cloud**: serve un `token`. Alcuni impianti lo consegnano dentro il
+  `GET_INIT_STATUS_REPLY`; altri (compreso quello di sviluppo) rispondono senza, e lì il token va
+  ottenuto dal login OIDC dell'account. In nessuno dei due casi è ancora implementata.
 - **Attuatori By‑me** (es. luci scala di domotica By‑me): potrebbero non rispondere via SIP anche se elencati in rubrica.
 - **Lock**: nessun feedback fisico di stato (auto‑relock ottimistico dopo 5 s).
 - **Rubrica**: su impianti solo‑cloud va estratta una tantum (vedi `docs/RUBRICA.md`); l'import automatico via cloud dipende da un token provisionato dall'account.

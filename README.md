@@ -29,22 +29,22 @@ reported so far.
 | Elvox Tab 5S UP 2 Wire WiFi | 40515 | 2FV2 | 2.1.0203 | cloud TLS | Working, reported by @CPietro — see the notes below |
 | Elvox Tab 5S UP 2 Wire WiFi | 40515 | — | — | cloud TLS | Cloud registration working after the 1.0.1 fix, reported by @gtarraran992 ([#1](../../issues/1)) |
 
-**What differs between plants.** The two Tab 5S reports made one thing clear: *the SIP state commands
-are plant-dependent, not universal*.
+**What differs between plants.** Both Tab 5S reports, plus the development plant, point at the same
+practical conclusion: *what matters is the address you send to, and how much the Tab tells you back*.
 
-- On the 40515 / 2FV2 plant, **DND works** — the Tab accepts the command and the official VIEW app
-  even shows a notification. **Voicemail turns on but not off** (still under investigation). And
-  `GET_INIT_STATUS` **does** get a reply, e.g.
-  `GET_INIT_STATUS_REPLY;[{"PARAM":"dnd","VALUE":"0"},{"PARAM":"voicemail","VALUE":"…"}]`.
-- On the 40507 / 2F plant used for development, none of that happens: every state command returns a
-  bare 200 OK with no effect, and `GET_INIT_STATUS` is never answered. Packet captures there show the
-  VIEW app sending no SIP at all when you toggle voicemail — the Tab only *announces* its new state.
-
-So if the voicemail/DND switches do nothing on your plant, that is expected behaviour for some
-installations rather than a misconfiguration on your side.
-
-Cloud-mode plants also need their SGA/PICG addresses set to match their own numbering — the defaults
-come from the development plant. See the options table below and `docs/RUBRICA.md`.
+- **Send state commands to the SGA.** On the development plant (40507 / 2F), `VOICEMAIL;ON|OFF` and
+  `DND;ON|OFF` work when they are sent to the SGA — `55001` there, taken from the phonebook's
+  `SYSTEM.MAGIC_APT_INTERCOM`. Sent anywhere else (the Tab's own address, the apartment group, the old
+  `60001` default) they return a bare 200 OK and do nothing, or a 404. If your switches appear dead,
+  the SGA/PICG options are the first thing to check — see the options table below.
+- **`GET_INIT_STATUS` replies, but not with the same amount of detail.** On the 40507 the reply is
+  short: `rubrica_ver`, `vm_ver`, `vm_level`, `dnd`, `voicemail`. On the 40515 / 2FV2 plant it is the
+  full payload — `dnd`, `voicemail`, `rubrica_ver`, `vm_ver`, `vm_level`, `vm_timeout`,
+  `vm_timeout_values`, `apt_names`, `GID`, `media_enc` and a `token`. Which is why the integration
+  parses what it finds and ignores what it doesn't, instead of assuming a fixed set.
+- **Media encryption is a per-plant value**, not a global default: the 40515 reports
+  `media_enc: "srtp"`, while the development plant refused SRTP outright and runs plain RTP.
+- Still open on the 40515: **voicemail switches on but not off**, under investigation by the reporter.
 
 Got it running on a different model, or on the same one with different results? Please open a
 [hardware compatibility report](../../issues/new?template=compatibility_report.yml) — reports where
@@ -210,13 +210,15 @@ automation:
 ## Known limitations
 
 - **Cloud-only plants**: the Tab's local HTTP interface (:80) may accept the TCP connection and then
-  stay silent, so there is no local phonebook to read. Camera, actuators and door opening still work
-  over SIP. Reading the initial state with `GET_INIT_STATUS` depends on the plant: some answer with a
-  `GET_INIT_STATUS_REPLY`, others never do (see *Compatibility*).
-- **Voicemail / DND**: whether these can be *commanded* at all depends on the plant — see
-  *Compatibility* above. Where they work, the command goes to the **SGA**
-  (`SYSTEM.MAGIC_APT_INTERCOM` in the phonebook, `55001` on the plant used for development).
-  Configurable in the options (**SGA**/**PICG**) or through the automatic `rubrica.db` import.
+  stay silent, so there is no local phonebook to read over the LAN. Camera, actuators, door opening
+  and the state commands still work over SIP.
+- **Voicemail / DND**: these are commanded through the **SGA** (`SYSTEM.MAGIC_APT_INTERCOM` in the
+  phonebook, `55001` on the plant used for development). Sent to any other address they are silently
+  ignored, so getting the SGA right is what makes them work — set it in the options or let the
+  `rubrica.db` import fill it in.
+- **Cloud phonebook**: needs a `token`. Some plants hand it over in the `GET_INIT_STATUS_REPLY`;
+  others (including the development plant) return a reply without it, and there the token has to come
+  from the account's OIDC login instead. Not implemented yet either way.
 - **By-me actuators** (e.g. stair lights on By-me home automation): these may not respond over SIP even
   when they are listed in the phonebook.
 - **Lock**: no physical state feedback (optimistic auto-relock after 5 s).
