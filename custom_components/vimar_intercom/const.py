@@ -17,8 +17,9 @@ MODEL        = "Elvox Tab 7S 2F+ WiFi"   # 40507 — dal QR: planttype=2F (Due F
 
 # ─── SIP — valori di default per cloud (override da config entry) ─────────────
 SIP_PORT = 7042                          # porta TLS cloud
-SIP_SNI  = "ipvdes.vimar.cloud"
-SIP_ROUTE = "ipvdes.vimar.cloud"
+# SNI e Route non sono costanti: valgono <cproxy>, che arriva dal QR e sta nel
+# config entry (runtime.SIP_PROXY, default "ipvdes.vimar.cloud"). Vedi
+# sip_client._route_line() e la connect TLS.
 
 # ─── Porta SIP locale (Flexisip sul citofono) ─────────────────────────────────
 LOCAL_SIP_PORT = 5060

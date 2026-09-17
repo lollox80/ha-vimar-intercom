@@ -499,24 +499,31 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     },
                 )
 
+        # Il form si ricompone su ciò che l'utente ha appena inviato, non solo
+        # sui valori salvati: ricostruirlo da `current` scarterebbe in silenzio
+        # tutte le altre modifiche fatte insieme a quella che non ha passato la
+        # validazione. `current` resta intatto perché serve ai confronti sopra
+        # (sip_changed) per capire cosa è davvero cambiato.
+        form = {**current, **(user_input or {})}
+
         return self.async_show_form(
             step_id="settings",
             data_schema=vol.Schema({
                 vol.Required(
                     "local_proxy",
-                    default=current.get(KEY_LOCAL_PROXY, "")
+                    default=form.get(KEY_LOCAL_PROXY, "")
                 ): str,
                 vol.Optional(
                     "use_local_udp",
-                    default=current.get(KEY_USE_LOCAL_UDP, True)
+                    default=form.get(KEY_USE_LOCAL_UDP, True)
                 ): bool,
                 vol.Optional(
                     "local_udp_port",
-                    default=current.get(KEY_LOCAL_UDP_PORT, DEFAULT_LOCAL_UDP_PORT)
+                    default=form.get(KEY_LOCAL_UDP_PORT, DEFAULT_LOCAL_UDP_PORT)
                 ): vol.All(vol.Coerce(int), vol.Range(min=1024, max=65535)),
                 vol.Optional(
                     KEY_MEDIA_ENC,
-                    default=current.get(KEY_MEDIA_ENC, False)
+                    default=form.get(KEY_MEDIA_ENC, False)
                 ): bool,
                 vol.Optional(
                     KEY_ACTUATORS,
@@ -524,11 +531,11 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 ): str,
                 vol.Optional(
                     KEY_SGA_TARGET,
-                    default=current.get(KEY_SGA_TARGET) or SGA_TARGET,
+                    default=form.get(KEY_SGA_TARGET) or SGA_TARGET,
                 ): str,
                 vol.Optional(
                     KEY_PICG_TARGET,
-                    default=current.get(KEY_PICG_TARGET) or PICG_TARGET,
+                    default=form.get(KEY_PICG_TARGET) or PICG_TARGET,
                 ): str,
             }),
             errors=errors,
@@ -580,7 +587,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Required("rubrica_file"): selector.FileSelector(
                     selector.FileSelectorConfig(accept=".db")
                 ),
-                vol.Optional("rubrica_gid", default=default_gid): str,
+                # Come sopra: se l'import fallisce, il GID digitato resta nel
+                # campo invece di tornare al valore salvato.
+                vol.Optional(
+                    "rubrica_gid",
+                    default=(user_input or {}).get("rubrica_gid") or default_gid,
+                ): str,
             }),
             errors=errors,
             description_placeholders={

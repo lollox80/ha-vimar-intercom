@@ -496,7 +496,7 @@ class VimarIntercomHub:
             uri, body, extra_headers={"Panda": "command"})
 
         self.stats["last_door_time"] = self._now()
-        self.stats["last_door_target"] = target or "55001"
+        self.stats["last_door_target"] = target or R.SGA_TARGET
         self.stats["last_door_result"] = msg
         if ok:
             self.stats["door_count"] += 1

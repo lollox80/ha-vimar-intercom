@@ -155,7 +155,7 @@ def _route_line():
     """Return Route header line (with trailing CRLF) or empty string."""
     if R.USE_LOCAL_UDP:
         return ""
-    return f"Route: <sip:{C.SIP_ROUTE};transport=tls;lr>\r\n"
+    return f"Route: <sip:{R.SIP_PROXY};transport=tls;lr>\r\n"
 
 
 def _simple_contact():
@@ -277,11 +277,15 @@ async def connect():
         # CDN HTTPS e NON parla SIP → senza SRV la connessione resta appesa.
         candidates = await loop.run_in_executor(None, _resolve_sip_targets, R.SIP_PROXY, C.SIP_PORT)
         last_err = None
+        # L'SNI è il nome del servizio cloud (<cproxy> del QR), non l'host SRV a
+        # cui ci si connette. Va preso dal config entry: su un impianto con un
+        # cproxy diverso da quello di default, una costante qui manderebbe in
+        # handshake TLS il nome sbagliato.
         for host, port in candidates:
-            _LOGGER.info("Connecting to SIP proxy %s:%d (SNI %s)...", host, port, C.SIP_SNI)
+            _LOGGER.info("Connecting to SIP proxy %s:%d (SNI %s)...", host, port, R.SIP_PROXY)
             try:
                 reader, writer = await asyncio.wait_for(
-                    asyncio.open_connection(host, port, ssl=ctx, server_hostname=C.SIP_SNI),
+                    asyncio.open_connection(host, port, ssl=ctx, server_hostname=R.SIP_PROXY),
                     timeout=12)
                 break
             except Exception as e:  # noqa: BLE001
