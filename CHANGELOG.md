@@ -1,12 +1,15 @@
 # Changelog
 
-Formato: Keep a Changelog. Versioni: semver. Le voci più recenti in alto.
+Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [semver](https://semver.org/).
+Newest entries on top. **Entries are written in English from 1.0.1 onwards**; earlier ones are in
+Italian and are kept as they were written.
 
 ## [Unreleased]
 
 ## [1.0.1] - 2026-09-17
 
-- **Fix registrazione SIP cloud su Tab 5S UP** ([#1](https://github.com/lollox80/ha-vimar-intercom/issues/1), segnalata da @gtarraran992): il QR di abbinamento contiene due domini SIP distinti — `domain` (dominio locale del citofono) e `cdomain` (dominio cloud) — ma il decoder teneva solo il primo, e su alcuni Tab 5S UP quel campo vale `127.0.0.1`. Il risultato erano URI `sip:<user>@127.0.0.1` e registrazione cloud sempre fallita. Ora `qr_decoder.extract_sip_credentials()` conserva entrambi i domini (`local_domain`/`cloud_domain`) e come default sceglie il locale solo se instradabile — loopback, `0.0.0.0` e `localhost` fanno ricadere su `cdomain` — e `runtime.configure()` seleziona il dominio attivo in base a `use_local_udp`, ricalcolando l'HA1 quando il dominio della modalità attiva è diverso da quello salvato. I config entry creati con versioni precedenti, che non hanno le nuove chiavi, continuano a usare `sip_domain` come prima. `qr_decoder.py`, `runtime.py`. Nuovi test in `tests/test_qr_domain_selection.py`.
+- **Fixed cloud SIP registration on Tab 5S UP** ([#1](https://github.com/lollox80/ha-vimar-intercom/issues/1), reported by @gtarraran992): the pairing QR code carries two distinct SIP domains — `domain` (the intercom's local domain) and `cdomain` (the cloud one) — but the decoder only kept the first, and on some Tab 5S UP units that field is `127.0.0.1`. The result was `sip:<user>@127.0.0.1` URIs and cloud registration failing every time. `qr_decoder.extract_sip_credentials()` now keeps both domains (`local_domain`/`cloud_domain`) and picks the local one as the pairing-time default only when it is actually routable — loopback, `0.0.0.0` and `localhost` fall back to `cdomain` — while `runtime.configure()` selects the active domain based on `use_local_udp`, recomputing HA1 when the active mode's domain differs from the saved one. Config entries created by earlier versions have neither of the new keys and keep using `sip_domain` as before. `qr_decoder.py`, `runtime.py`. New tests in `tests/test_qr_domain_selection.py`.
+- Added `CONTRIBUTING.md` and issue templates (bug report, hardware compatibility report).
 
 ## [1.0.0] - 2026-09-07
 
