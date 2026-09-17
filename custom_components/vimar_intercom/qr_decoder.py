@@ -12,7 +12,7 @@ _LOGGER = logging.getLogger(__name__)
 QR_ID       = "id"         # SIP user-id (es. "12345")
 QR_PWD      = "pwd"        # SIP password
 QR_DOMAIN   = "domain"     # SIP domain locale del citofono
-QR_CDOMAIN  = "cdomain"    # Cloud domain (uguale a domain per Tab5S IP)
+QR_CDOMAIN  = "cdomain"    # Cloud domain (registrazione via proxy Vimar)
 QR_CPROXY   = "cproxy"     # Cloud proxy (es. "ipvdes.vimar.cloud")
 QR_PROXY    = "proxy"      # Proxy locale (se presente)
 QR_GID      = "gid"        # Group ID impianto
@@ -21,6 +21,22 @@ QR_PLANTTYPE = "planttype" # "2F", "2FV2" o "IP"
 QR_VIDEO    = "video"      # Anteprima video abilitata ("0"/"1")
 QR_CLOUD    = "cloud"      # Tipo connessione ("0"/"1"/"2")
 QR_PC       = "pc"         # Product code
+
+
+# ─── Domini non instradabili ─────────────────────────────────────────────
+# Alcuni QR (osservati su Tab 5S UP, issue #1) portano «domain=127.0.0.1»:
+# è il dominio SIP interno del citofono, valido solo per i client sul Tab
+# stesso. Usarlo come dominio SIP di Home Assistant produce URI del tipo
+# «sip:<user>@127.0.0.1» che il proxy cloud rifiuta. In quei casi il dominio
+# buono è «cdomain».
+_NON_ROUTABLE_DOMAINS = frozenset({
+    "", "127.0.0.1", "::1", "0.0.0.0", "localhost", "localhost.localdomain",
+})
+
+
+def _is_routable(domain: str) -> bool:
+    """False se «domain» è vuoto o punta al loopback (non usabile da HA)."""
+    return domain.strip().lower() not in _NON_ROUTABLE_DOMAINS
 
 
 class QRDecodeError(ValueError):
@@ -102,13 +118,28 @@ def extract_sip_credentials(fields: dict[str, str]) -> dict[str, str]:
     """Estrae le credenziali SIP utili dal dizionario di campi QR decodificato.
 
     Returns un dict con le chiavi:
-        sip_user, sip_password, sip_domain, sip_ha1,
-        cloud_proxy, gid, plant_type, mac
+        sip_user, sip_password, sip_domain, local_domain, cloud_domain,
+        sip_ha1, cloud_proxy, gid, plant_type, mac
     """
     sip_user   = fields.get(QR_ID, "")
     sip_pass   = fields.get(QR_PWD, "")
-    # domain può essere in "domain" o "cdomain"
-    sip_domain = fields.get(QR_DOMAIN) or fields.get(QR_CDOMAIN, "")
+
+    # Il QR può contenere due domini distinti: «domain» (SIP locale del Tab) e
+    # «cdomain» (dominio cloud). Li conserviamo entrambi — runtime.configure()
+    # sceglie quello attivo in base a use_local_udp — e come default prendiamo
+    # il locale solo se è davvero instradabile, altrimenti il cloud.
+    local_domain = fields.get(QR_DOMAIN, "").strip()
+    cloud_domain = fields.get(QR_CDOMAIN, "").strip()
+
+    if _is_routable(local_domain):
+        sip_domain = local_domain
+    else:
+        sip_domain = cloud_domain or local_domain
+        if cloud_domain:
+            _LOGGER.info(
+                "QR: domain=%r non instradabile, uso cdomain=%r come dominio SIP",
+                local_domain, cloud_domain,
+            )
     cloud_proxy = fields.get(QR_CPROXY) or fields.get(QR_PROXY, "ipvdes.vimar.cloud")
 
     # Pre-calcola HA1 per evitare di tenere la password in memoria durante auth
@@ -120,6 +151,8 @@ def extract_sip_credentials(fields: dict[str, str]) -> dict[str, str]:
         "sip_user":     sip_user,
         "sip_password": sip_pass,
         "sip_domain":   sip_domain,
+        "local_domain": local_domain,
+        "cloud_domain": cloud_domain,
         "sip_ha1":      sip_ha1,
         "cloud_proxy":  cloud_proxy,
         "gid":          fields.get(QR_GID, ""),

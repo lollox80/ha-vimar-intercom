@@ -1,0 +1,70 @@
+name: Hardware compatibility report
+description: You tried it on a model other than the Tab 7S 2F+ — tell us how it went
+labels: ["compatibility"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This integration was reverse-engineered on one plant. Reports from other
+        hardware are what makes it work for everyone else — **including reports
+        where everything just worked**.
+
+  - type: input
+    id: model
+    attributes:
+      label: Model and article number
+      placeholder: "Elvox Tab 5S UP 2 Wire WiFi — art. 40515"
+    validations:
+      required: true
+
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware version
+    validations:
+      required: true
+
+  - type: dropdown
+    id: plant_type
+    attributes:
+      label: Plant type (`planttype` in the QR)
+      options: ["2F", "2FV2", "IP", "Not sure"]
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: works
+    attributes:
+      label: What works
+      options:
+        - label: SIP registration — local UDP
+        - label: SIP registration — cloud TLS
+        - label: Incoming call / doorbell event
+        - label: Answer and hang up
+        - label: Door open
+        - label: Video (camera entity / on-demand)
+        - label: Audio
+        - label: Voicemail / DND switches actually change the state on the device
+        - label: Actuators (stair light, gate relay, …)
+
+  - type: textarea
+    id: changes
+    attributes:
+      label: Changes you had to make
+      description: A diff, or a description of what you patched and why
+      render: diff
+
+  - type: textarea
+    id: sip_details
+    attributes:
+      label: Plant addressing
+      description: |
+        If you know them: which address is the outdoor unit, which is the Tab
+        itself, which is the apartment group, and what SGA/PICG you configured.
+        Very helpful for making the defaults smarter.
+      render: shell
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else

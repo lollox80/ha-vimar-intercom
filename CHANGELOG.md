@@ -4,6 +4,10 @@ Formato: Keep a Changelog. Versioni: semver. Le voci più recenti in alto.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-17
+
+- **Fix registrazione SIP cloud su Tab 5S UP** ([#1](https://github.com/lollox80/ha-vimar-intercom/issues/1), segnalata da @gtarraran992): il QR di abbinamento contiene due domini SIP distinti — `domain` (dominio locale del citofono) e `cdomain` (dominio cloud) — ma il decoder teneva solo il primo, e su alcuni Tab 5S UP quel campo vale `127.0.0.1`. Il risultato erano URI `sip:<user>@127.0.0.1` e registrazione cloud sempre fallita. Ora `qr_decoder.extract_sip_credentials()` conserva entrambi i domini (`local_domain`/`cloud_domain`) e come default sceglie il locale solo se instradabile — loopback, `0.0.0.0` e `localhost` fanno ricadere su `cdomain` — e `runtime.configure()` seleziona il dominio attivo in base a `use_local_udp`, ricalcolando l'HA1 quando il dominio della modalità attiva è diverso da quello salvato. I config entry creati con versioni precedenti, che non hanno le nuove chiavi, continuano a usare `sip_domain` come prima. `qr_decoder.py`, `runtime.py`. Nuovi test in `tests/test_qr_domain_selection.py`.
+
 ## [1.0.0] - 2026-09-07
 
 **Prima release pubblica** su `github.com/lollox80/ha-vimar-intercom` (HACS custom repository).

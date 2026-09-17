@@ -1,0 +1,101 @@
+name: Bug report
+description: Something doesn't work — registration, door opening, video, events
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before you post: **scrub your logs**. Remove the SIP password, the raw QR
+        payload, the HA1 hash, the MAC address and any cloud token. Replace your
+        plant domain with `<cdomain>` if you'd rather not publish it.
+
+  - type: input
+    id: model
+    attributes:
+      label: Intercom model
+      description: Commercial name and article number, from the label on the device
+      placeholder: "Elvox Tab 5S UP 2 Wire WiFi — art. 40515"
+    validations:
+      required: true
+
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware version
+      description: Shown in the device settings menu, or in the SIP User-Agent header
+      placeholder: "e.g. 1.8.3 / baresip v0.5.9"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: plant_type
+    attributes:
+      label: Plant type
+      description: The `planttype` field of the pairing QR code
+      options:
+        - "2F"
+        - "2FV2"
+        - "IP"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Connection mode
+      options:
+        - "Local UDP (direct to the intercom on the LAN)"
+        - "Cloud TLS (via the Vimar proxy)"
+        - "Both — it fails in both"
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: Integration and Home Assistant versions
+      placeholder: "vimar_intercom 1.0.1 — HA 2026.9.1"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happens
+      description: What you did, what you expected, what you got instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Enable debug logging, reproduce, then paste the relevant lines (scrubbed).
+        ```yaml
+        logger:
+          logs:
+            custom_components.vimar_intercom: debug
+        ```
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: sip_trace
+    attributes:
+      label: SIP trace (optional, but it usually decides the issue)
+      description: |
+        Output of `python tools/sip_probe.py options --target <addr>`, or the
+        REGISTER/MESSAGE exchange from the debug log. Strip the `Authorization`
+        header values.
+      render: shell
+
+  - type: checkboxes
+    id: scrubbed
+    attributes:
+      label: Confirmation
+      options:
+        - label: I removed passwords, QR payloads, HA1 hashes and MAC addresses from everything above
+          required: true
