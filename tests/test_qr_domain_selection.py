@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from custom_components.vimar_intercom import qr_decoder, runtime
 
-LOCAL = "192.168.0.149"
+LOCAL = "192.0.2.10"
 CLOUD = "abc.ipvdes.vimar.cloud"
 
 
@@ -22,7 +22,7 @@ def _fields(**over) -> dict:
         "cproxy": "ipvdes.vimar.cloud",
         "gid": "101",
         "planttype": "2F",
-        "mac": "C8:DF:84:3B:9A:4F",
+        "mac": "AA:BB:CC:DD:EE:FF",
     }
     f.update(over)
     return f
