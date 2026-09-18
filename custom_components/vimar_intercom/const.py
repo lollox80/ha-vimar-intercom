@@ -82,12 +82,21 @@ APNS_SANDBOX   = True
 # impianto verificato: il valore effettivo usato a runtime è configurabile via
 # options (manualmente o dall'importer rubrica.db) e vive in
 # runtime.SGA_TARGET / runtime.PICG_TARGET (vedi runtime.configure()). Il resto
-# del codice (hub.py, switch.py, button.py, __init__.py) legge da lì, mai da
-# queste costanti direttamente.
+# del codice (hub.py, switch.py, button.py, lock.py, __init__.py) legge da lì,
+# mai da queste costanti direttamente — e tests/test_no_hardcoded_plant_values.py
+# fallisce se il letterale rientra in una di quelle piattaforme. Fino alla 1.0.4
+# questa riga era falsa: button.py e lock.py passavano "55001" a mano.
 SGA_TARGET              = "55001"
 # PICG (capogruppo appartamento) — destinatario di GET_INIT_STATUS / GET_NICKS.
 # Su questo impianto coincide con l'SGA (55001). [VERIFICATO 20/08/2026]
 PICG_TARGET             = SGA_TARGET
+# Targa interna — usata solo dal bottone "Chiama Casa (interno)".
+# A differenza di SGA/PICG **non è configurabile**: non abbiamo un campo del
+# config entry né una chiave di rubrica.db da cui ricavarla, e indovinarla
+# (SGA+1) sarebbe esattamente il tipo di supposizione che questo progetto non
+# fa. Su un impianto diverso il bottone chiamerà un indirizzo inesistente e la
+# chiamata fallirà: nessun effetto collaterale, al contrario dell'apri-porta.
+INTERNAL_PANEL_TARGET   = "55002"
 # SEGRETERIA_TARGET/DND_TARGET non sono più letti dal codice (switch.py usa
 # runtime.SGA_TARGET): restano solo come alias storici/di comodo.
 SEGRETERIA_TARGET       = SGA_TARGET

@@ -10,6 +10,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from . import const as C
 from .const import DOMAIN
 from .device import device_info
 
@@ -23,7 +24,13 @@ async def async_setup_entry(
 ) -> None:
     hub = hass.data[DOMAIN][entry.entry_id]["hub"]
     async_add_entities([
-        VimarIntercomLock(hub, entry.entry_id, key="lock", name="Serratura", door_target="55001", door_command="OPEN_2F"),
+        # door_target=None → hub.async_door usa runtime.DOOR_ESTERNO, cioè
+        # l'SGA configurato (options o import da rubrica.db). Con il letterale
+        # "55001" che c'era prima, su un impianto con MAGIC_APT_INTERCOM diverso
+        # il comando partiva verso l'indirizzo sbagliato, tornava 200 senza
+        # effetto e la serratura mostrava "sbloccata" con la porta chiusa.
+        VimarIntercomLock(hub, entry.entry_id, key="lock", name="Serratura",
+                          door_target=None, door_command=C.DOOR_COMMAND),
     ])
 
 

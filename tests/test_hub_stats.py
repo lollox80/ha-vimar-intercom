@@ -120,3 +120,35 @@ def test_new_phonebook_event(hub):
 def test_unmapped_message_no_crash(hub):
     hub._update_stats("message", "SOMETHING_UNKNOWN;foo;bar")
     hub._update_stats("message", "")
+
+
+# ─── apri-porta senza target esplicito → SGA configurato ─────────────────
+
+def test_apri_porta_senza_target_usa_l_sga_configurato(hub, monkeypatch):
+    """È il meccanismo su cui si appoggiano `lock.py` e il bottone "Apri Porta"
+    da quando non passano più il letterale "55001": chiamano `async_door()`
+    senza target e il destinatario lo risolve l'hub da `runtime`.
+    """
+    import asyncio
+
+    from custom_components.vimar_intercom import runtime
+
+    runtime.configure({
+        "sip_user": "u", "sip_password": "p", "sip_domain": "impianto.test",
+        "sga_target": "12345",
+    })
+
+    inviati = []
+
+    async def _fake_msg(uri, body, extra_headers=None):
+        inviati.append((uri, body))
+        return True, "200"
+
+    monkeypatch.setattr(hub_mod.sip, "do_system_message", _fake_msg)
+
+    asyncio.run(hub.async_door())
+
+    assert inviati == [("sip:12345@impianto.test", hub_mod.C.DOOR_COMMAND)]
+    assert hub.stats["last_door_target"] == "12345", (
+        "le statistiche devono riportare l'SGA vero, non un default"
+    )

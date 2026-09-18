@@ -11,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from . import const as C
 from .const import DOMAIN
 from .device import device_info
 from . import runtime as R
@@ -42,11 +43,17 @@ async def async_setup_entry(
 
     entities: list[ButtonEntity] = [
         VimarCallButton(hub, entry.entry_id),
-        VimarCallTargetButton(hub, entry.entry_id, "55001", "Chiama Video (esterno)", "call_ext"),
-        VimarCallTargetButton(hub, entry.entry_id, "55002", "Chiama Casa (interno)", "call_int"),
+        # Targa esterna = SGA configurato, non il letterale "55001": quello
+        # vale solo sull'impianto di sviluppo.
+        VimarCallTargetButton(hub, entry.entry_id, R.SGA_TARGET, "Chiama Video (esterno)", "call_ext"),
+        # La targa interna non ha (ancora) un corrispettivo configurabile:
+        # resta il default storico, isolato in const. Vedi issue sul tema.
+        VimarCallTargetButton(hub, entry.entry_id, C.INTERNAL_PANEL_TARGET,
+                              "Chiama Casa (interno)", "call_int"),
         VimarAnswerButton(hub, entry.entry_id),
         VimarHangupButton(hub, entry.entry_id),
-        VimarDoorButton(hub, entry.entry_id, "55001", "Apri Porta", "door_street", "mdi:door-open"),
+        # target=None → stesso default dell'apri-porta di hub.async_door.
+        VimarDoorButton(hub, entry.entry_id, None, "Apri Porta", "door_street", "mdi:door-open"),
     ]
 
     # Attuatori dinamici dalla rubrica: options["actuators"] ha la precedenza
