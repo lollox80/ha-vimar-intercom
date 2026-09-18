@@ -46,3 +46,29 @@ def test_qr_invalid_base64_raises_or_returns_falsy():
     except Exception:
         return
     assert not out
+
+
+def test_la_password_non_finisce_nei_log(caplog):
+    """Il payload decrittato contiene «PWD=...»: non deve comparire in nessun
+    record, a nessun livello. Il buffer di debug interno cattura i DEBUG comunque
+    e li serve via HTTP su /api/vimar_intercom/debug."""
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    _decode(_make_qr(PAYLOAD))
+
+    testo = "\n".join(r.getMessage() for r in caplog.records)
+    assert "secret" not in testo, "la password SIP e' finita in un log"
+    assert "PWD" not in testo
+
+
+def test_i_nomi_dei_campi_restano_diagnosticabili(caplog):
+    """Togliere il payload dal log non deve togliere la possibilità di capire
+    perché un QR sbagliato non viene accettato."""
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    _decode(_make_qr(PAYLOAD))
+
+    testo = "\n".join(r.getMessage() for r in caplog.records)
+    assert "domain" in testo and "planttype" in testo
