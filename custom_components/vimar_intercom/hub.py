@@ -308,12 +308,12 @@ class VimarIntercomHub:
         """Background auto-call when video stream opens without active call."""
         try:
             if target:
-                uri = f"sip:{target}@{sip.C.SIP_DOMAIN}"
+                uri = f"sip:{target}@{R.SIP_DOMAIN}"
                 ok, msg = await sip.do_call(target=uri)
             else:
                 # Autoaccensione: chiama la TARGA VIDEO (55100), non il PICG 55001
                 # (55001 dava 488 Not Acceptable Here — vedi const.CAMERA_TARGET).
-                uri = f"sip:{sip.C.CAMERA_TARGET}@{sip.C.SIP_DOMAIN}"
+                uri = f"sip:{C.CAMERA_TARGET}@{R.SIP_DOMAIN}"
                 ok, msg = await sip.do_call(target=uri)
             if not ok:
                 _LOGGER.error("Auto-call failed: %s", msg)
@@ -601,6 +601,12 @@ class VimarIntercomHub:
         elif msg_type == "call_ended":
             self._cancel_call_timeout()
             self._cancel_keyframe_loop()
+            # La chiamata e' chiusa: da qui in poi un INVITE in arrivo e' uno
+            # squillo vero, non l'eco della nostra. Senza questo reset il ramo
+            # "ring" piu' sotto continuerebbe a rispondere 603 Decline per
+            # sempre quando a chiudere e' stato il citofono (il watchdog
+            # _delayed_hangup non arriva: la sua guardia richiede sip.in_call).
+            self._auto_called = False
 
         if msg_type == "ring":
             # If we initiated the call (tap to view / auto-call), the Tab5S
@@ -891,7 +897,10 @@ class VimarIntercomHub:
                 header_name="Panda",
                 header_value="blue",
             )
-            self._init_status_sent = True
+            # Solo se l'invio e' riuscito: altrimenti il ramo di retry del
+            # keepalive (if not self._init_status_sent) non potrebbe mai
+            # scattare e i sensori resterebbero a None fino al riavvio di HA.
+            self._init_status_sent = bool(ok)
             _LOGGER.info("GET_INIT_STATUS → %s: ok=%s msg=%s", R.PICG_TARGET, ok, msg)
         except Exception:
             _LOGGER.exception("GET_INIT_STATUS invio fallito")
