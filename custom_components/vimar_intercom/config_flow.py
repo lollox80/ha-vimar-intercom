@@ -16,8 +16,10 @@ from homeassistant.components.file_upload import process_uploaded_file
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
+from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 
 from .const import DOMAIN, SGA_TARGET, PICG_TARGET
+from . import discovery
 from . import qr_decoder
 from . import rubrica_import
 
@@ -232,6 +234,15 @@ async def _test_sip_registration(
 
 # ─── Config Flow ─────────────────────────────────────────────────────────────
 
+def _default(value: str | None) -> dict:
+    """`{"default": value}` solo se c'è un valore, altrimenti `{}`.
+
+    Un `default=""` renderebbe il campo precompilato con una stringa vuota
+    invece di lasciarlo vuoto: sono due cose diverse per voluptuous.
+    """
+    return {"default": value} if value else {}
+
+
 class VimarIntercomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Gestisce l'onboarding dell'integrazione Vimar Intercom."""
 
@@ -240,6 +251,69 @@ class VimarIntercomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         self._credentials: dict = {}
         self._qr_error: str | None = None
+        # Dati del record mDNS, quando si arriva dal discovery (vedi
+        # async_step_zeroconf). Vuoto se l'utente ha avviato il flusso a mano.
+        self._discovered: dict[str, str] = {}
+
+    async def async_step_zeroconf(
+        self, discovery_info: ZeroconfServiceInfo
+    ) -> FlowResult:
+        """Il citofono si è annunciato in LAN come `_eipvdes._tcp`.
+
+        Il record porta indirizzo, MAC e il dominio SIP che il Tab dichiara per
+        sé; le credenziali no, quindi il flusso prosegue normalmente (QR o
+        manuale) con questi campi già compilati.
+        """
+        info = discovery.extract_discovery(
+            str(discovery_info.host), discovery_info.properties
+        )
+        _LOGGER.debug(
+            "Zeroconf: host=%s proxy=%s domain=%s model=%s fw=%s",
+            discovery_info.host, info["local_proxy"],
+            info["sip_domain"], info["model"], info["firmware"],
+        )
+
+        mac = info["mac_normalized"]
+        if not mac:
+            # Senza MAC non c'è modo di riconoscere lo stesso citofono a un
+            # discovery successivo: meglio non aprire un flusso che creerebbe
+            # duplicati a ogni riavvio.
+            return self.async_abort(reason="no_mac")
+
+        # Se questo citofono è già configurato, aggiorna il suo indirizzo —
+        # cambia da solo quando il DHCP gli assegna un IP diverso — e chiudi.
+        await self.async_set_unique_id(mac)
+        self._abort_if_unique_id_configured(
+            updates={KEY_LOCAL_PROXY: info["local_proxy"]}
+        )
+        # Copre le installazioni create prima del discovery, il cui unique_id
+        # è «utente@dominio»: si riconoscono dal MAC salvato nei dati.
+        self._async_abort_entries_match({KEY_MAC: info["mac"]})
+
+        self._discovered = info
+        self.context["title_placeholders"] = {
+            "name": info["model"] or "Vimar Intercom",
+            "host": info["local_proxy"],
+        }
+        return await self.async_step_zeroconf_confirm()
+
+    async def async_step_zeroconf_confirm(
+        self, user_input: dict | None = None
+    ) -> FlowResult:
+        """Conferma del citofono trovato, poi si prosegue come sempre."""
+        if user_input is not None:
+            return await self.async_step_user()
+
+        return self.async_show_form(
+            step_id="zeroconf_confirm",
+            data_schema=vol.Schema({}),
+            description_placeholders={
+                "host":     self._discovered.get("local_proxy", ""),
+                "mac":      self._discovered.get("mac", ""),
+                "model":    self._discovered.get("model", "") or "n/d",
+                "firmware": self._discovered.get("firmware", "") or "n/d",
+            },
+        )
 
     async def async_step_user(
         self, user_input: dict | None = None
@@ -328,7 +402,11 @@ class VimarIntercomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({
                 vol.Required("sip_user"):     str,
                 vol.Required("sip_password"): str,
-                vol.Required("sip_domain"):   str,
+                # Il dominio annunciato dal citofono, quando lo conosciamo: è
+                # quello che quel Tab si aspetta di vedere nelle richieste SIP.
+                vol.Required(
+                    "sip_domain", **_default(self._discovered.get("sip_domain"))
+                ): str,
                 vol.Optional("cloud_proxy", default=DEFAULT_CLOUD_PROXY): str,
             }),
             errors=errors,
@@ -384,7 +462,9 @@ class VimarIntercomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="network",
             data_schema=vol.Schema({
-                vol.Required("local_proxy"): str,
+                vol.Required(
+                    "local_proxy", **_default(self._discovered.get("local_proxy"))
+                ): str,
                 vol.Optional("use_local_udp", default=True): bool,
                 vol.Optional(
                     "local_udp_port", default=DEFAULT_LOCAL_UDP_PORT

@@ -1,6 +1,10 @@
 {
   "config": {
     "step": {
+      "zeroconf_confirm": {
+        "title": "Intercom found on the network",
+        "description": "Home Assistant found a Vimar intercom at {host} (MAC {mac}).\nModel: {model} — firmware: {firmware}.\n\nSetting it up still needs the SIP credentials: continue and pick the pairing QR code or manual entry. The address and SIP domain the intercom advertises are already filled in for the next steps."
+      },
       "user": {
         "title": "Vimar Intercom",
         "description": "Add the Vimar Elvox video intercom. SIP credentials are built-in."
@@ -53,7 +57,8 @@
       "sip_registration_failed": "SIP registration failed. Check that the intercom IP is correct and reachable from HA."
     },
     "abort": {
-      "already_configured": "Device is already configured."
+      "already_configured": "Device is already configured.",
+      "no_mac": "The intercom advertised itself without a MAC address, so it cannot be identified reliably. Please set it up manually."
     }
   },
   "options": {

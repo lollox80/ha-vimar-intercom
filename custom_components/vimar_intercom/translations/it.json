@@ -1,6 +1,10 @@
 {
   "config": {
     "step": {
+      "zeroconf_confirm": {
+        "title": "Citofono trovato in rete",
+        "description": "Home Assistant ha trovato un citofono Vimar all'indirizzo {host} (MAC {mac}).\nModello: {model} — firmware: {firmware}.\n\nPer configurarlo servono ancora le credenziali SIP: continua e scegli il QR di abbinamento o l'inserimento manuale. L'indirizzo e il dominio SIP annunciati dal citofono sono già compilati nei passi successivi."
+      },
       "user": {
         "title": "Vimar Intercom",
         "description": "Aggiungi il videocitofono Vimar Elvox. Le credenziali SIP sono integrate."
@@ -53,7 +57,8 @@
       "sip_registration_failed": "Registrazione SIP fallita. Verifica che l'IP del citofono sia corretto e raggiungibile da HA."
     },
     "abort": {
-      "already_configured": "Il dispositivo è già configurato."
+      "already_configured": "Il dispositivo è già configurato.",
+      "no_mac": "Il citofono si è annunciato senza indirizzo MAC: impossibile riconoscerlo in modo stabile. Configuralo manualmente."
     }
   },
   "options": {
