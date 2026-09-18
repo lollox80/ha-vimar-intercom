@@ -6,6 +6,38 @@ Italian and are kept as they were written.
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-09-18
+
+Three bugs in `hub.py`, all found by a code audit rather than in the field, and all of the
+kind that fails without looking like a failure.
+
+- **Video auto-start never worked.** Opening the camera stream is supposed to place a SIP
+  call to the video entry panel. The URI was built from `sip.C.SIP_DOMAIN` — but `sip_client`
+  imports `const as C`, and `SIP_DOMAIN` does not exist there: the active domain lives in
+  `runtime`, because it differs between local UDP and cloud mode. Every auto-call therefore
+  raised `AttributeError`, which the surrounding `except` turned into a single
+  `Auto-call error:` line, so the stream simply showed nothing. `CAMERA_TARGET` was reached
+  through the same wrong module. Both now read from where the value actually lives.
+- **After a call ended, the doorbell stopped ringing.** `_auto_called` marks a call we
+  placed ourselves, so that the INVITE the plant echoes back is not announced as a doorbell
+  ring. It was cleared on six paths but not when the call ended — and the watchdog that
+  would have cleared it requires `sip.in_call`, which is already `False` by then. From that
+  point on every genuine ring matched the "we started this" test and was answered with
+  `603 Decline`, until Home Assistant was restarted. It is now cleared on `call_ended`.
+- **A failed `GET_INIT_STATUS` was never retried.** The flag marking the request as sent was
+  set regardless of the outcome, which made the retry branch in the keepalive
+  (`if not self._init_status_sent`) unreachable. One transient failure left `rubrica_ver`,
+  `vm_ver`, `vm_level` and the real voicemail/DND states at `None` until a restart. The flag
+  now follows the result of the send.
+
+New regression tests in `tests/test_hub_autocall.py`, including a guard that fails if a
+`SIP_DOMAIN` constant reappears in `const.py`.
+
+Note for plants that answer `200 OK` to `GET_INIT_STATUS` but never send the reply
+([#1](https://github.com/lollox80/ha-vimar-intercom/issues/1)): this release does not change
+that behaviour — the send succeeds, so the retry is not triggered. That case is tracked
+separately.
+
 ## [1.0.2] - 2026-09-17
 
 - **Per-installation device identity.** `const.py` shipped `DEVICE_IMEI = "351234567890123"` (and `DEVICE_UUID = DEVICE_IMEI`), a constant every installation sent in the SIP `Mobile-IMEI` header and in the `+sip.instance` contact parameter. The Vimar cloud ties a registration — and its push routing — to the device identity, so two plants presenting the same one compete for the same registration. The identity is now generated once per installation by `runtime.new_device_identity()` (15-digit IMEI, random UUIDv4) and stored in the config entry; existing entries are migrated silently on the next start, and `runtime.configure()` falls back to a fresh ephemeral identity when none is stored, so no code path can reuse a shared value. `const.py`, `runtime.py`, `__init__.py`, `sip_client.py`. New tests in `tests/test_device_identity.py`, including a regression guard that fails if a hardcoded identity reappears in `const.py`.
