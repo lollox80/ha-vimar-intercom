@@ -190,22 +190,33 @@ automation:
 ## Automazioni di esempio
 
 Il file `packages/vimar_intercom.yaml` (da copiare in `config/packages/`) contiene un'automazione
-"squillo → snapshot + clip 15 s → notifica", basata sul cambio di stato dell'entità `event`:
+"squillo → notifica" basata sul cambio di stato dell'entità `event`, più un riaggancio di sicurezza
+che chiude una chiamata rimasta aperta per due minuti:
 
 ```yaml
 automation:
-  - alias: "Citofono - Squillo → snapshot e clip"
+  - alias: "Citofono - Squillo → notifica"
     trigger:
       - platform: state
         entity_id: event.vimar_intercom_doorbell
     action:
-      - service: camera.snapshot
-        target: { entity_id: camera.vimar_intercom_intercom }
-        data: { filename: "/media/vimar/citofono_{{ now().strftime('%Y%m%d_%H%M%S') }}.jpg" }
-      # ... clip + notify (vedi packages/vimar_intercom.yaml)
+      - action: notify.mobile_app_IL_TUO_TELEFONO
+        data:
+          title: "🔔 Qualcuno al citofono"
+          message: "Squillo delle {{ now().strftime('%H:%M:%S') }}."
+          data:
+            image: "/api/camera_proxy/camera.vimar_intercom_intercom"
 ```
 
----
+⚠ **Non aggiungerci `camera.snapshot`.** Sembra funzionare — la chiamata al servizio riesce — ma non
+scrive nessun file e non logga niente, perché sulla versione attuale l'entità camera non può produrre
+immagini ([#8](../../issues/8)). Nemmeno `camera.record` funziona: richiede l'integrazione `stream`,
+che una camera MJPEG non fornisce. E non aggirare il problema con una `camera: platform: ffmpeg`
+puntata su `/api/vimar_intercom/av`: blocca Home Assistant finché la sonda di ffmpeg non scade. Gli
+stessi avvisi, con i dettagli, sono dentro il file del package.
+
+In `docs/lovelace_example.yaml` c'è una card Lovelace di base con i pulsanti rispondi / apri porta /
+riaggancia. Il riquadro del video, per lo stesso motivo di sopra, resta vuoto.
 
 ## Limiti noti
 

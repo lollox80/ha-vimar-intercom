@@ -189,23 +189,33 @@ automation:
 ## Example automations
 
 `packages/vimar_intercom.yaml` (copy it into `config/packages/`) contains a
-"ring → snapshot + 15 s clip → notification" automation, driven by the state change of the `event`
-entity:
+"ring → notification" automation driven by the state change of the `event` entity, plus a safety
+hang-up that closes a call left open for two minutes:
 
 ```yaml
 automation:
-  - alias: "Intercom - Ring → snapshot and clip"
+  - alias: "Intercom - Ring → notification"
     trigger:
       - platform: state
         entity_id: event.vimar_intercom_doorbell
     action:
-      - service: camera.snapshot
-        target: { entity_id: camera.vimar_intercom_intercom }
-        data: { filename: "/media/vimar/intercom_{{ now().strftime('%Y%m%d_%H%M%S') }}.jpg" }
-      # ... clip + notify (see packages/vimar_intercom.yaml)
+      - action: notify.mobile_app_YOUR_PHONE
+        data:
+          title: "🔔 Someone at the door"
+          message: "Ring at {{ now().strftime('%H:%M:%S') }}."
+          data:
+            image: "/api/camera_proxy/camera.vimar_intercom_intercom"
 ```
 
----
+⚠ **Don't add `camera.snapshot` to it.** It appears to work — the service call succeeds — but it
+writes no file and logs nothing, because the camera entity cannot produce an image on current code
+([#8](../../issues/8)). `camera.record` doesn't work either: it needs the `stream` integration, which
+an MJPEG camera doesn't provide. And don't work around it with a `camera: platform: ffmpeg` pointed
+at `/api/vimar_intercom/av`: that hangs Home Assistant until the ffmpeg probe times out. The package
+file carries the same warnings, with the details.
+
+`docs/lovelace_example.yaml` has a basic Lovelace card with the answer / open door / hang up buttons.
+Note that the video pane in it stays empty for the same reason as above.
 
 ## Known limitations
 

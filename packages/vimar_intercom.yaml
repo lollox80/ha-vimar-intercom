@@ -1,0 +1,75 @@
+# =============================================================================
+#  Vimar Intercom — esempio di package per Home Assistant
+#
+#  Copialo in `config/packages/` (serve `packages: !include_dir_named packages/`
+#  sotto `homeassistant:` in configuration.yaml) e adatta i nomi: gli entity_id
+#  qui sotto sono quelli di un'installazione con l'integrazione appena aggiunta,
+#  ma cambiano in base al nome che hai dato al dispositivo e all'area.
+#  Cercali in Strumenti per sviluppatori → Stati filtrando per "vimar".
+#
+#  Da adattare di sicuro:
+#    - notify.mobile_app_IL_TUO_TELEFONO   (Impostazioni → Companion App)
+#    - gli entity_id di event/binary_sensor se il tuo differisce
+# =============================================================================
+
+automation:
+  # --- Squillo → notifica sul telefono ---------------------------------------
+  - id: vimar_intercom_squillo_notifica
+    alias: "Citofono - Squillo → notifica"
+    description: >-
+      Allo squillo manda una notifica con l'anteprima della telecamera.
+    mode: restart
+    max_exceeded: silent
+    trigger:
+      # L'entità `event` cambia stato (timestamp) a ogni pressione del campanello.
+      - platform: state
+        entity_id: event.vimar_intercom_doorbell
+      # Ridondante, ma utile se per qualche motivo l'event non scatta.
+      - platform: state
+        entity_id: binary_sensor.vimar_intercom_intercom_squillo
+        to: "on"
+    variables:
+      ts: "{{ now().strftime('%d/%m/%Y %H:%M:%S') }}"
+    action:
+      - action: notify.mobile_app_IL_TUO_TELEFONO
+        data:
+          title: "🔔 Qualcuno al citofono"
+          message: "Squillo delle {{ ts }}."
+          data:
+            # camera_proxy è autenticato e l'app companion è già loggata.
+            # Mostra qualcosa solo se in quel momento c'è un flusso video attivo.
+            image: "/api/camera_proxy/camera.vimar_intercom_intercom"
+
+  # --- Riaggancio di sicurezza ------------------------------------------------
+  # Rete di protezione: chiude una chiamata rimasta aperta (automazione
+  # interrotta, riavvio di HA, pulsante premuto per sbaglio).
+  - id: vimar_intercom_hangup_sicurezza
+    alias: "Citofono - Riaggancio di sicurezza"
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.vimar_intercom_intercom_in_call
+        to: "on"
+        for: "00:02:00"
+    action:
+      - action: vimar_intercom.hangup
+
+# =============================================================================
+#  PERCHÉ QUI NON C'È LO SNAPSHOT
+#
+#  Verrebbe naturale aggiungere `camera.snapshot` allo squillo. Non funziona, e
+#  fallisce nel modo peggiore: senza errori. `hub.video_frame` restituisce
+#  sempre None da quando il video viene inviato come NAL H.264 sul WebSocket, e
+#  Home Assistant, quando l'immagine è None, esce senza scrivere il file e senza
+#  loggare niente. Il risultato è un'automazione che sembra funzionare per
+#  settimane e non ha mai salvato un solo file. Vedi issue #8.
+#
+#  `camera.record` non funziona per un motivo diverso: richiede l'integrazione
+#  `stream`, che una camera MJPEG non fornisce.
+#
+#  NON aggiungere una `camera: platform: ffmpeg` puntata su
+#  /api/vimar_intercom/av per aggirare il problema: la piattaforma ffmpeg sonda
+#  l'input quando viene caricata, l'endpoint senza una chiamata attiva tiene la
+#  connessione aperta senza mandare dati, e Home Assistant smette di rispondere
+#  finché la sonda non scade (circa un minuto, provato sul campo).
+# =============================================================================

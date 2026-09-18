@@ -1,0 +1,60 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Vimar Intercom — card Lovelace "citofono base"
+# Video del pianerottolo + pulsanti Rispondi / Apri porta / Riaggancia.
+#
+# ⚠ ATTENZIONE, leggi prima di aspettarti il video: sulla versione attuale la
+# card `picture-entity` qui sotto NON mostra nulla. L'entità camera non produce
+# immagini né stream MJPEG, perché il video viaggia come NAL H.264 sul WebSocket
+# e il percorso JPEG non è più alimentato (issue #8). La card resta utile per i
+# pulsanti e per lo stato; il riquadro del video sarà vuoto finché la questione
+# non è risolta.
+#
+# NB: questa card non fa nemmeno audio bidirezionale (parlare): l'audio a 2 vie
+# richiede una card custom su /audio_ws.
+#
+# Come si usa: Dashboard → Modifica → aggiungi card → "Manuale" → incolla.
+# Aggiusta l'entity della camera se sul tuo HA ha un nome diverso
+# (cerca in Strumenti sviluppatore → Stati una entità che inizia con `camera.` e
+#  contiene "vimar"/"intercom").
+# ─────────────────────────────────────────────────────────────────────────────
+type: vertical-stack
+cards:
+  # Video live del citofono (MJPEG). Durante la chiamata mostra il pianerottolo.
+  - type: picture-entity
+    entity: camera.vimar_intercom_intercom
+    camera_view: live
+    show_name: false
+    show_state: false
+
+  # Stato squillo/chiamata (facoltativo ma utile)
+  - type: entities
+    entities:
+      # Gli entity_id cambiano con il nome del dispositivo e con l'area: se HA
+      # dice "entità non trovata", cercali in Strumenti per sviluppatori → Stati
+      # filtrando per "vimar".
+      - entity: sensor.vimar_intercom_intercom_stato   # idle / ringing / in_call
+        name: Stato citofono
+      - entity: sensor.vimar_intercom_intercom_ultimo_chiamante
+        name: Ultimo chiamante
+
+  # Pulsanti: usano i SERVIZI dell'integrazione (indipendenti dal nome entità)
+  - type: horizontal-stack
+    cards:
+      - type: button
+        name: Rispondi
+        icon: mdi:phone
+        tap_action:
+          action: call-service
+          service: vimar_intercom.answer
+      - type: button
+        name: Apri porta
+        icon: mdi:door-open
+        tap_action:
+          action: call-service
+          service: vimar_intercom.open_door
+      - type: button
+        name: Riaggancia
+        icon: mdi:phone-hangup
+        tap_action:
+          action: call-service
+          service: vimar_intercom.hangup
