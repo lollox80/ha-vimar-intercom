@@ -6,6 +6,32 @@ Italian and are kept as they were written.
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-09-19
+
+Security fix. Anyone who paired with a QR code should update.
+
+- **The SIP password was readable over HTTP by any logged-in Home Assistant user.**
+  Three pieces, each harmless on its own. `qr_decoder` logged the decrypted pairing
+  payload at DEBUG — and that payload contains `PWD=<your SIP password>`. The internal
+  ring buffer raises the `vimar_intercom` logger to DEBUG unconditionally, so that line
+  was captured whether or not you had configured `logger:`. And `/api/vimar_intercom/debug`
+  serves that buffer to any authenticated user, guest accounts included.
+
+  All three are now closed: the payload is never logged (only how many fields were found
+  and their names, which is what actually helps diagnose a wrong QR), the debug endpoint
+  requires an **administrator**, and every line entering the buffer passes through a new
+  `log_redact` module that masks credential-shaped values — `pwd`/`password`/`ha1`/`token`
+  assignments, `Authorization` and `Proxy-Authorization` headers, Digest `response=`
+  fields, and the `{"PARAM":"token","VALUE":"…"}` form carried by
+  `GET_INIT_STATUS_REPLY`. The masking is a safety net, not the rule: credentials must not
+  be logged in the first place.
+
+  If your Home Assistant has non-administrator users, or you have ever shared a debug
+  dump, treat the SIP password as exposed and re-pair from the intercom panel to rotate it.
+
+New tests in `tests/test_log_redact.py`, plus two in `tests/test_qr_decoder.py` that fail
+if the password ever reaches a log record again.
+
 ## [1.0.3] - 2026-09-18
 
 Three bugs in `hub.py`, all found by a code audit rather than in the field, and all of the

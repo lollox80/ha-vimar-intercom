@@ -84,7 +84,11 @@ def decode(qr_text: str) -> dict[str, str]:
     except Exception as exc:
         raise QRDecodeError(f"Decriptazione AES fallita: {exc}") from exc
 
-    _LOGGER.debug("QR payload decrittato: %s", plaintext[:200])
+    # Il payload decrittato contiene «PWD=<password SIP>»: non va loggato a
+    # nessun livello. Il buffer di debug interno cattura i DEBUG comunque, e
+    # li serve via HTTP su /api/vimar_intercom/debug. Sotto si logga solo
+    # quali campi sono stati trovati, che è ciò che serve a diagnosticare un
+    # QR del tipo sbagliato.
 
     # 4. Parse righe «key=value»
     fields: dict[str, str] = {}
@@ -98,6 +102,8 @@ def decode(qr_text: str) -> dict[str, str]:
 
     if not fields:
         raise QRDecodeError("Nessun campo trovato nel payload decrittato")
+
+    _LOGGER.debug("QR decrittato: %d campi (%s)", len(fields), ", ".join(sorted(fields)))
 
     # Verifica minima: deve contenere almeno id e domain (SIP QR)
     if QR_ID not in fields or (QR_DOMAIN not in fields and QR_CDOMAIN not in fields):
