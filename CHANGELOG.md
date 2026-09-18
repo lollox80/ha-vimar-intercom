@@ -6,6 +6,36 @@ Italian and are kept as they were written.
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-09-19
+
+- **The lock and the "Apri Porta" button ignored the configured SGA.** `sga_target` has
+  been configurable since 1.0.0 — from the options flow or imported from `rubrica.db` —
+  and `const.py` claimed that every platform read it from `runtime`. That was not true:
+  `lock.py` passed the literal `"55001"` and did not even import `runtime`, and `button.py`
+  did the same for the door and call buttons.
+
+  On the plant this was developed against, `SYSTEM.MAGIC_APT_INTERCOM` happens to be
+  `55001`, so nothing looked wrong. On a plant where it differs, the switches and the
+  actuators imported from the phonebook followed the configured address while **the lock
+  entity — the one exposed to Apple Home — and the "Apri Porta" button kept sending
+  `OPEN_2F` to 55001**. As far as we know that returns a bare `200 OK` with no effect,
+  which `hub.async_door` counts as success: the lock showed *unlocked* for five seconds
+  while the door stayed shut. Failing while reporting success is the worst of the options.
+
+  Both now pass no target at all, so `hub.async_door` resolves it from
+  `runtime.DOOR_ESTERNO` like every other path. The "Chiama Video (esterno)" button uses
+  `runtime.SGA_TARGET`.
+
+- The internal panel address used by "Chiama Casa (interno)" moved to
+  `const.INTERNAL_PANEL_TARGET`. It is **not** configurable: there is no config entry field
+  and no `rubrica.db` key to derive it from, and guessing it (SGA+1) is exactly the kind of
+  assumption this project does not make. On a different plant that button will call an
+  address that does not exist and the call will fail — no side effect, unlike the door.
+
+`tests/test_no_hardcoded_plant_values.py` now fails if a plant address reappears as a
+literal in `lock.py`, `button.py` or `switch.py`, and `tests/test_hub_stats.py` covers the
+targetless `async_door()` path the two entities now rely on.
+
 ## [1.0.4] - 2026-09-19
 
 Security fix. Anyone who paired with a QR code should update.
