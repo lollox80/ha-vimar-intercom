@@ -13,9 +13,11 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse, callback
 import homeassistant.helpers.config_validation as cv
+from homeassistant.exceptions import Unauthorized
 from homeassistant.helpers import device_registry as dr
 
 from .const import DOMAIN
+from .log_redact import redact
 from .hub import VimarIntercomHub
 from . import media_handler as media
 from . import push_sender
@@ -30,10 +32,16 @@ _MAX_DEBUG_LOG = 200
 
 
 class _DebugHandler(logging.Handler):
-    """Captures vimar_intercom logs into a ring buffer."""
+    """Captures vimar_intercom logs into a ring buffer.
+
+    Il buffer viene servito via HTTP da VimarDebugView, quindi ogni riga
+    passa da `redact()`: le credenziali non dovrebbero mai arrivare fin qui,
+    ma se una riga di diagnostica ne porta una, non deve diventare
+    leggibile da un endpoint.
+    """
     def emit(self, record):
         try:
-            msg = self.format(record)
+            msg = redact(self.format(record))
             _debug_log.append(msg)
             if len(_debug_log) > _MAX_DEBUG_LOG:
                 del _debug_log[:len(_debug_log) - _MAX_DEBUG_LOG]
@@ -654,6 +662,12 @@ class VimarDebugView(HomeAssistantView):
     requires_auth = True
 
     async def get(self, request: web.Request) -> web.Response:
+        # `requires_auth` da solo lascia leggere il log a qualunque utente
+        # di Home Assistant, ospiti compresi. Qui dentro passa la traccia
+        # SIP dell'impianto: e' materiale da amministratore.
+        user = request.get("hass_user")
+        if user is None or not user.is_admin:
+            raise Unauthorized()
         try:
             n = int(request.query.get("lines", "100"))
         except ValueError:
