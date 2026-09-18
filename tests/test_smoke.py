@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-PURE = ["const", "qr_decoder", "model_detect", "srtp", "rubrica_import", "runtime"]
+PURE = ["const", "qr_decoder", "model_detect", "srtp", "rubrica_import", "runtime", "discovery"]
 
 COMPONENT = Path(__file__).resolve().parents[1] / "custom_components" / "vimar_intercom"
 
