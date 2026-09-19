@@ -120,7 +120,23 @@ def _transport():
 
 
 def _my_port():
-    return R.LOCAL_UDP_PORT if R.USE_LOCAL_UDP else 5070
+    """La porta su cui ascoltiamo **davvero**.
+
+    connect() ripiega su una porta effimera quando LOCAL_UDP_PORT e' occupata.
+    Fino alla 1.0.5 questa funzione restituiva comunque la porta configurata, e
+    quel valore finiva in Via, nel Contact della REGISTER e in _simple_contact():
+    la registrazione riusciva lo stesso (le risposte tornano al source port) ma
+    l'INVITE in arrivo veniva instradato verso una porta dove non ascolta
+    nessuno. Campanello muto, nessun errore, nessun log.
+    """
+    if not R.USE_LOCAL_UDP:
+        return 5070
+    if _udp_sock is not None:
+        try:
+            return int(_udp_sock.getsockname()[1])
+        except OSError:
+            pass
+    return R.LOCAL_UDP_PORT
 
 
 def _via_line(branch):
@@ -223,11 +239,23 @@ def _make_auth(method, uri, challenge):
 
 # ─── Transport ──────────────────────────────────────────────────────
 
-def _create_ssl_context():
+def _create_ssl_context(verify: bool = True):
+    """Contesto TLS per la modalita' cloud.
+
+    Con il CA di Vimar presente (`vimar_rootca.pem`) si verifica contro quello.
+    Senza, e con verify=True, si verifica contro il trust store di sistema.
+    verify=False disattiva ogni verifica: fino alla 1.0.5 era il comportamento
+    di **tutte** le installazioni, perche' il CA non e' nel repo e il ramo else
+    era l'unico attivo — in silenzio. Chi si fosse messo in mezzo avrebbe
+    raccolto la REGISTER con il digest della password SIP.
+
+    connect() ora prova prima verificando e ripiega qui solo se l'handshake
+    fallisce per il certificato, scrivendolo nel log.
+    """
     ctx = ssl.create_default_context()
     if os.path.exists(C.CA_PATH):
         ctx.load_verify_locations(C.CA_PATH)
-    else:
+    elif not verify:
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
     return ctx
@@ -260,9 +288,18 @@ async def connect():
         _udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             _udp_sock.bind(("0.0.0.0", R.LOCAL_UDP_PORT))
-        except OSError:
-            # Se la porta è già in uso (restart HA) riprova con 0
+        except OSError as e:
+            # Porta occupata (restart di HA, un altro servizio SIP, una seconda
+            # entry): si ripiega su una effimera. _my_port() la rilegge dalla
+            # socket, quindi Via e Contact restano veri — ma va detto, perche'
+            # se qualcun altro tiene la porta standard puo' intercettare le
+            # chiamate in arrivo al posto nostro.
             _udp_sock.bind(("0.0.0.0", 0))
+            _LOGGER.warning(
+                "Porta UDP %d occupata (%s): in ascolto sulla %d. Se un altro "
+                "servizio SIP tiene la %d, le chiamate in arrivo potrebbero "
+                "non raggiungere Home Assistant.",
+                R.LOCAL_UDP_PORT, e, _udp_sock.getsockname()[1], R.LOCAL_UDP_PORT)
         _udp_sock.setblocking(False)
         _udp_target = (R.LOCAL_PROXY, C.LOCAL_SIP_PORT)
         lock = asyncio.Lock()
@@ -271,7 +308,6 @@ async def connect():
     else:
         # ── TLS/TCP cloud mode ─────────────────────────────────────
         loop = asyncio.get_running_loop()
-        ctx = await loop.run_in_executor(None, _create_ssl_context)
         # Il proxy cloud reale è pubblicato via DNS SRV (_sips._tcp.<cproxy>):
         # es. flexiprod1/2/3.ipvdes2.vimarsso.cloud:7042. <cproxy> stesso è un
         # CDN HTTPS e NON parla SIP → senza SRV la connessione resta appesa.
@@ -281,17 +317,44 @@ async def connect():
         # cui ci si connette. Va preso dal config entry: su un impianto con un
         # cproxy diverso da quello di default, una costante qui manderebbe in
         # handshake TLS il nome sbagliato.
-        for host, port in candidates:
-            _LOGGER.info("Connecting to SIP proxy %s:%d (SNI %s)...", host, port, R.SIP_PROXY)
-            try:
-                reader, writer = await asyncio.wait_for(
-                    asyncio.open_connection(host, port, ssl=ctx, server_hostname=R.SIP_PROXY),
-                    timeout=12)
+        # Due giri: prima verificando il certificato, poi — solo se a fermarci
+        # e' stato il certificato e non la rete — senza verifica, dicendolo.
+        # L'ordine conta: chi ha un impianto che presenta un certificato
+        # verificabile ottiene una connessione sicura senza dover configurare
+        # niente, e chi non ce l'ha continua a funzionare come prima, ma con una
+        # riga nel log invece che in silenzio.
+        cert_error = None
+        for verify in (True, False):
+            ctx = await loop.run_in_executor(None, _create_ssl_context, verify)
+            if not verify:
+                _LOGGER.warning(
+                    "TLS: certificato del proxy cloud non verificabile (%s). "
+                    "Riprovo SENZA verifica: la connessione resta cifrata ma non "
+                    "autenticata, quindi un intermediario potrebbe leggere la "
+                    "REGISTER e ricavare offline la password SIP. Per chiudere "
+                    "questo buco serve il CA di Vimar in %s.",
+                    cert_error, C.CA_PATH)
+            for host, port in candidates:
+                _LOGGER.info("Connecting to SIP proxy %s:%d (SNI %s, verify=%s)...",
+                             host, port, R.SIP_PROXY, verify)
+                try:
+                    reader, writer = await asyncio.wait_for(
+                        asyncio.open_connection(host, port, ssl=ctx, server_hostname=R.SIP_PROXY),
+                        timeout=12)
+                    break
+                except ssl.SSLCertVerificationError as e:
+                    cert_error = e
+                    last_err = e
+                    _LOGGER.warning("SIP TLS %s:%d: certificato rifiutato: %s", host, port, e)
+                    reader = writer = None
+                except Exception as e:  # noqa: BLE001
+                    last_err = e
+                    _LOGGER.warning("SIP TLS connect to %s:%d failed: %s", host, port, e)
+                    reader = writer = None
+            if writer is not None or cert_error is None:
+                # Riuscito, oppure fallito per motivi che il secondo giro non
+                # risolverebbe (host irraggiungibile, timeout, rete assente).
                 break
-            except Exception as e:  # noqa: BLE001
-                last_err = e
-                _LOGGER.warning("SIP TLS connect to %s:%d failed: %s", host, port, e)
-                reader = writer = None
         if writer is None:
             raise ConnectionError(f"Nessun proxy SIP cloud raggiungibile: {last_err}")
         lock = asyncio.Lock()
@@ -744,11 +807,17 @@ async def do_register():
     await send(_msg(seq=s1))
     resps = await _wait_final(cid)
 
+    # Ogni uscita negativa deve azzerare `registered`: e' anche il keepalive a
+    # chiamare questa funzione, e fino alla 1.0.5 un fallimento lasciava il flag
+    # a True. Home Assistant dichiarava il citofono raggiungibile mentre non lo
+    # era piu', e il binary_sensor restava verde a impianto spento.
     for r in resps:
         code, hdrs, *_ = _parse(r)
         if code == 401:
             ch = hdrs.get("www-authenticate", "")
             if not ch:
+                _LOGGER.warning("REGISTER: 401 senza challenge, registrazione fallita")
+                _set_registered(False)
                 return False
             auth = _make_auth("REGISTER", uri, ch)
             await send(_msg(auth=auth, seq=_next_cseq()))
@@ -757,11 +826,15 @@ async def do_register():
                     _set_registered(True)
                     _LOGGER.info("SIP registered successfully")
                     return True
+            _LOGGER.warning("REGISTER: nessun 200 dopo l'autenticazione")
+            _set_registered(False)
             return False
         elif code == 200:
             _set_registered(True)
             _LOGGER.info("SIP registered successfully")
             return True
+    _LOGGER.warning("REGISTER: nessuna risposta finale utile (%d risposte)", len(resps))
+    _set_registered(False)
     return False
 
 

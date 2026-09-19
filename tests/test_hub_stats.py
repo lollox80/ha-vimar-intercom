@@ -152,3 +152,19 @@ def test_apri_porta_senza_target_usa_l_sga_configurato(hub, monkeypatch):
     assert hub.stats["last_door_target"] == "12345", (
         "le statistiche devono riportare l'SGA vero, non un default"
     )
+
+
+# ─── sip_uri: nessun newline nella request line ──────────────────────────────
+
+def test_sip_uri_rifiuta_i_newline():
+    """Seconda rete dopo `validate.sip_target`: un CR/LF qui spezzerebbe il
+    messaggio SIP in due e permetterebbe di iniettare header."""
+    import pytest as _pytest
+
+    from custom_components.vimar_intercom import runtime
+
+    runtime.configure({"sip_user": "u", "sip_password": "p", "sip_domain": "x.test"})
+    assert hub_mod.sip_uri("55001") == "sip:55001@x.test"
+    for cattivo in ("55001\r\nSubject: x", "55001\n", "\r"):
+        with _pytest.raises(ValueError):
+            hub_mod.sip_uri(cattivo)

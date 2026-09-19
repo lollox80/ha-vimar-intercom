@@ -6,6 +6,72 @@ Italian and are kept as they were written.
 
 ## [Unreleased]
 
+## [1.0.6] - 2026-09-19
+
+The last of the audit findings: the registration state machine, and four ways an
+unvalidated value reached a SIP message or the filesystem.
+
+### Registration: three bugs that all reported success
+
+- **Once the SIP registration was lost, it never came back.** The keepalive loop ran inside
+  `if sip.registered:`, so the moment that flag went false the loop spun forever doing
+  nothing. In local UDP — the default — there was no other recovery path: the intercom
+  stayed disconnected until Home Assistant was restarted. The loop now calls
+  `reconnect()` when it finds itself unregistered.
+- **A failed `REGISTER` left `registered` at `True`.** Three exit paths returned `False`
+  without touching the flag, so Home Assistant kept reporting the intercom as reachable
+  while it wasn't — sometimes for an hour. Every negative exit now clears it, and says why
+  in the log.
+- **After a recovery, the plant state was never re-read.** Voicemail, DND and the phonebook
+  version can change while Home Assistant is disconnected. Regaining the registration now
+  clears `_init_status_sent`, so `GET_INIT_STATUS` is asked again instead of carrying on
+  with values from before the outage.
+
+### The bind fallback advertised a port nobody was listening on
+
+`connect()` falls back to an ephemeral UDP port when the configured one is busy, but
+`_my_port()` kept returning the configured value — and that value goes into `Via`, into the
+`REGISTER` `Contact` and into the in-dialog contacts. Registration still succeeded, because
+responses come back to the source port, so everything looked fine: the binary sensor was
+green and "open door" worked. But the incoming `INVITE` was routed to a port where nothing
+was listening, so **the doorbell never rang again, with no error anywhere**. `_my_port()`
+now reads the port from the socket, and the fallback logs a warning instead of happening
+silently.
+
+### Input validation
+
+New pure module `validate.py`, applied at the boundaries:
+
+- **`/api/vimar_intercom/video?target=…`** went straight into the request line of an
+  `INVITE`. An arbitrary value called an arbitrary address; a `CRLF` split the SIP message
+  in two and injected headers. Now digits only, and `hub.sip_uri()` refuses newlines as a
+  second net for the authenticated paths.
+- **`fetch_local`'s `save_as`** went into `hass.config.path()` as given: a `../` wrote
+  anywhere under the Home Assistant user. Now it is a filename, and the file is created in
+  `/config/vimar_intercom/`.
+- **`fetch_local`'s `host`** was arbitrary, and that request carries the SIP password in
+  Digest — anyone able to call the service could have it sent to a server of their choosing.
+  Now only literal private or loopback addresses; DNS names are refused on purpose, because
+  resolving them here means trusting a resolution that can change between the check and the
+  request. Redirects are no longer followed, and the scheme is restricted to http/https.
+- **`_is_local_request` trusted `request.remote`.** Behind a reverse proxy or Remote UI that
+  is the proxy's address, which made all of Internet "local". A declared proxy hop is now
+  reason enough to refuse: the legitimate consumers of these endpoints talk to Home
+  Assistant directly and never declare one.
+
+### Cloud TLS is verified when it can be
+
+`_create_ssl_context()` fell back to `CERT_NONE` whenever `vimar_rootca.pem` was missing —
+which is every installation, since that file is not in the repo — silently. `connect()` now
+tries with verification first (the bundled CA if present, the system trust store otherwise)
+and only falls back to an unverified handshake if the certificate is what stopped it,
+saying so in the log. Plants that worked before keep working; the ones whose certificate can
+be verified now get an authenticated connection without configuring anything.
+
+New tests in `tests/test_validate.py`, `tests/test_sip_transport.py` and
+`tests/test_hub_keepalive.py`; 11 of them fail on 1.0.5. `_keepalive_loop` was split so the
+per-tick logic is testable. Full suite: 164 passing.
+
 ## [1.0.5] - 2026-09-19
 
 - **The lock and the "Apri Porta" button ignored the configured SGA.** `sga_target` has
