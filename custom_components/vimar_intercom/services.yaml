@@ -81,12 +81,19 @@ fetch_local:
       selector:
         text:
     save_as:
-      name: Salva come (in /config)
+      name: Salva come (nome file, in /config/vimar_intercom/)
+      description: >-
+        Solo il nome del file: lettere, cifre, punto, trattino e underscore.
+        Il file nasce in /config/vimar_intercom/, non dove indichi tu.
       example: vimar_rubrica.db
       selector:
         text:
     host:
       name: Host (default proxy locale)
+      description: >-
+        Indirizzo IP privato o di loopback, scritto per esteso. Un nome DNS non
+        e' accettato: questa richiesta porta la password SIP in Digest e deve
+        restare in LAN.
       selector:
         text:
     scheme:
