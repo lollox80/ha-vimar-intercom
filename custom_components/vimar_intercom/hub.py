@@ -24,6 +24,20 @@ SIP_ID_NAMES = {
 }
 
 
+def sip_uri(target) -> str:
+    """URI SIP per un target dell'impianto, rifiutando i newline.
+
+    Un CR/LF dentro `target` spezza la request line e permette di iniettare
+    header nel messaggio SIP. I chiamanti non autenticati sono gia' filtrati in
+    `__init__` (`validate.sip_target`); questa e' la seconda rete, per i percorsi
+    autenticati e per chiunque aggiunga un chiamante domani.
+    """
+    t = str(target)
+    if "\r" in t or "\n" in t:
+        raise ValueError(f"target SIP non valido: {t!r}")
+    return f"sip:{t}@{R.SIP_DOMAIN}"
+
+
 def _uri_to_id(uri: str | None) -> str | None:
     """'sip:55001@dominio' → '55001'."""
     if not uri:
@@ -248,7 +262,7 @@ class VimarIntercomHub:
         for target in MODEL_PROBE_TARGETS:
             if R.DETECTED_MODEL:
                 break
-            uri = f"sip:{target}@{R.SIP_DOMAIN}"
+            uri = sip_uri(target)
             try:
                 await sip.do_options(target=uri)
             except Exception as e:
@@ -308,12 +322,12 @@ class VimarIntercomHub:
         """Background auto-call when video stream opens without active call."""
         try:
             if target:
-                uri = f"sip:{target}@{R.SIP_DOMAIN}"
+                uri = sip_uri(target)
                 ok, msg = await sip.do_call(target=uri)
             else:
                 # Autoaccensione: chiama la TARGA VIDEO (55100), non il PICG 55001
                 # (55001 dava 488 Not Acceptable Here — vedi const.CAMERA_TARGET).
-                uri = f"sip:{C.CAMERA_TARGET}@{R.SIP_DOMAIN}"
+                uri = sip_uri(C.CAMERA_TARGET)
                 ok, msg = await sip.do_call(target=uri)
             if not ok:
                 _LOGGER.error("Auto-call failed: %s", msg)
@@ -452,7 +466,7 @@ class VimarIntercomHub:
     async def async_call(self, target: str | None = None) -> tuple[bool, str]:
         self._auto_called = False
         if target:
-            uri = f"sip:{target}@{R.SIP_DOMAIN}"
+            uri = sip_uri(target)
             return await sip.do_call(target=uri)
         return await sip.do_call()
 
@@ -484,7 +498,7 @@ class VimarIntercomHub:
         No active call required.
         """
         if target:
-            uri = f"sip:{target}@{R.SIP_DOMAIN}"
+            uri = sip_uri(target)
             body = command or C.DOOR_COMMAND
         else:
             uri = R.DOOR_ESTERNO
@@ -544,7 +558,7 @@ class VimarIntercomHub:
         if target.startswith("sip:"):
             uri = target
         else:
-            uri = f"sip:{target}@{R.SIP_DOMAIN}"
+            uri = sip_uri(target)
         headers = {header_name: header_value} if header_name else None
         _LOGGER.info("Custom command: uri=%s body=%r headers=%s", uri, body, headers)
         try:
@@ -559,13 +573,13 @@ class VimarIntercomHub:
         return ok, msg
 
     async def async_probe(self, target: str) -> tuple[bool, str]:
-        uri = f"sip:{target}@{R.SIP_DOMAIN}"
+        uri = sip_uri(target)
         return await sip.do_options(target=uri)
 
     async def async_scan(self, start: int, end: int) -> list[dict]:
         results = []
         for addr in range(start, end + 1):
-            uri = f"sip:{addr}@{R.SIP_DOMAIN}"
+            uri = sip_uri(addr)
             try:
                 ok, msg = await sip.do_options(target=uri)
                 results.append({"addr": addr, "ok": ok, "msg": msg})
@@ -938,18 +952,38 @@ class VimarIntercomHub:
     async def _keepalive_loop(self):
         while self._running:
             await asyncio.sleep(120)
+            await self._keepalive_tick()
+
+    async def _keepalive_tick(self):
+        """Un giro di keepalive. Separato dal loop per poterlo testare."""
+        try:
             if sip.registered:
-                try:
-                    ok = await sip.do_register()
-                    _LOGGER.debug("Keepalive: %s", "OK" if ok else "FAILED")
-                    if ok:
-                        self.stats["last_register_time"] = self._now()
-                        # Se lo stato iniziale non è mai stato ottenuto (primo
-                        # invio fallito / reconnect dopo offline), riprova ora.
-                        if not self._init_status_sent:
-                            await self._request_init_status()
-                    else:
-                        self.stats["register_failures"] += 1
-                    self._touch()
-                except Exception as e:
-                    _LOGGER.error("Keepalive error: %s", e)
+                ok = await sip.do_register()
+                _LOGGER.debug("Keepalive: %s", "OK" if ok else "FAILED")
+            else:
+                # Fino alla 1.0.5 questo ramo non esisteva: la guardia era
+                # `if sip.registered`, quindi persa la registrazione il loop
+                # girava a vuoto per sempre. In UDP locale — il default —
+                # non c'era nessun altro percorso di recupero: il citofono
+                # restava scollegato fino al riavvio di Home Assistant.
+                _LOGGER.warning("Registrazione SIP assente: provo a recuperarla")
+                ok = await sip.reconnect()
+                if ok:
+                    # Tornati su dopo un'interruzione: mentre eravamo
+                    # scollegati lo stato del Tab puo' essere cambiato
+                    # (segreteria, DND, versione rubrica). Rifacciamo la
+                    # domanda invece di restare con i valori di prima.
+                    self._init_status_sent = False
+                    _LOGGER.info("Registrazione SIP recuperata")
+
+            if ok:
+                self.stats["last_register_time"] = self._now()
+                # Se lo stato iniziale non è mai stato ottenuto (primo
+                # invio fallito / reconnect dopo offline), riprova ora.
+                if not self._init_status_sent:
+                    await self._request_init_status()
+            else:
+                self.stats["register_failures"] += 1
+            self._touch()
+        except Exception as e:
+            _LOGGER.error("Keepalive error: %s", e)
