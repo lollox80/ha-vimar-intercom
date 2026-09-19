@@ -18,6 +18,7 @@ from homeassistant.helpers import device_registry as dr
 
 from .const import DOMAIN
 from .log_redact import redact
+from . import validate
 from .hub import VimarIntercomHub
 from . import media_handler as media
 from . import push_sender
@@ -261,13 +262,31 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return ok
 
 
+# Header che indicano un hop di proxy davanti a noi.
+_FORWARDED_HEADERS = ("x-forwarded-for", "x-real-ip", "forwarded")
+
+
 def _is_local_request(request) -> bool:
     """True se la richiesta arriva da rete locale/loopback.
 
     Blocca l'accesso agli stream video da Internet (es. remote UI / port
     forwarding). I consumatori legittimi (camera HA, HomeKit) girano sull'host
     HA stesso, quindi vedono IP loopback o privato.
+
+    Dietro un reverse proxy (add-on NGINX, Cloudflare tunnel, Remote UI)
+    `request.remote` e' l'indirizzo del proxy, non del chiamante: fino alla
+    1.0.5 questo rendeva "locale" tutto Internet. Un hop dichiarato e' quindi
+    motivo sufficiente per rifiutare, perche' i consumatori legittimi di questi
+    endpoint parlano con Home Assistant in diretta e non ne dichiarano mai.
     """
+    for h in _FORWARDED_HEADERS:
+        if h in request.headers:
+            _LOGGER.warning(
+                "Richiesta a %s rifiutata: arriva da un proxy (%s), quindi "
+                "l'indirizzo del chiamante non e' verificabile",
+                getattr(request, "path", "?"), h)
+            return False
+
     peer = getattr(request, "remote", None)
     if not peer:
         return False
@@ -315,19 +334,41 @@ def _register_services(hass: HomeAssistant) -> None:
         Replica ciò che fa l'app in "home mode": /rest/get_info.php?action=status|nickname,
         /rest/get_file.php?name=rubrica|mailbox. Restituisce stato+anteprima e può salvare il file.
         """
+        import os
+
         import requests as _rq
         from requests.auth import HTTPDigestAuth
+
+        # Il citofono e' in LAN, e questa richiesta porta la password SIP in
+        # Digest. Un host arbitrario significava farsi mandare quelle credenziali
+        # da un server scelto dal chiamante: si accettano solo indirizzi IP
+        # privati o di loopback, scritti per esteso.
         host = call.data.get("host") or runtime.LOCAL_PROXY
-        url = f"{call.data.get('scheme','http')}://{host}/{call.data['path'].lstrip('/')}"
-        save_as = call.data.get("save_as")
+        if not validate.is_private_host(host):
+            _LOGGER.error("fetch_local: host %r rifiutato (serve un IP privato)", host)
+            return {"ok": False, "error": f"host non consentito: {host}"}
+        scheme = validate.http_scheme(call.data.get("scheme"), "http")
+        url = f"{scheme}://{host}/{call.data['path'].lstrip('/')}"
+
+        # `save_as` finiva in hass.config.path() cosi' com'era: un "../"
+        # scriveva ovunque sotto l'utente di Home Assistant. Ora e' solo un nome
+        # di file, e il file nasce in una sottocartella dedicata.
+        raw_name = call.data.get("save_as")
+        save_as = validate.safe_filename(raw_name) if raw_name else None
+        if raw_name and not save_as:
+            _LOGGER.error("fetch_local: save_as %r rifiutato (nome file non valido)", raw_name)
+            return {"ok": False, "error": f"nome file non valido: {raw_name}"}
+        out_dir = hass.config.path(DOMAIN)
 
         def _do():
             r = _rq.get(url, auth=HTTPDigestAuth(runtime.SIP_USER, runtime.SIP_PASSWORD),
-                        timeout=15, headers={"User-Agent": "TOGA/2.4.0"})
+                        timeout=15, headers={"User-Agent": "TOGA/2.4.0"},
+                        allow_redirects=False)
             data = r.content
             saved = None
             if save_as:
-                dst = hass.config.path(save_as)
+                os.makedirs(out_dir, exist_ok=True)
+                dst = os.path.join(out_dir, save_as)
                 with open(dst, "wb") as f:
                     f.write(data)
                 saved = dst
@@ -693,7 +734,14 @@ class VimarMjpegView(HomeAssistantView):
         hub = self._hass.data.get(DOMAIN, {}).get(self._entry_id, {}).get("hub")
         if hub is None:
             return web.Response(status=503, text="Integration not loaded")
-        target = request.query.get("target")
+        # Il target finisce nella request line di un INVITE. Senza controllo,
+        # un parametro arbitrario faceva chiamare qualunque indirizzo e un CRLF
+        # spezzava il messaggio SIP in due.
+        raw_target = request.query.get("target")
+        target = validate.sip_target(raw_target)
+        if raw_target and target is None:
+            _LOGGER.warning("Target %r rifiutato: sono ammesse solo cifre", raw_target[:40])
+            return web.Response(status=400, text="Invalid target")
         await hub.stream_opened(target=target)
 
         response = web.StreamResponse()
