@@ -62,7 +62,8 @@
         "title": "Impostazioni Vimar Intercom",
         "menu_options": {
           "settings": "Impostazioni di rete e attuatori",
-          "import_rubrica": "Importa attuatori da rubrica.db"
+          "import_rubrica": "Importa attuatori da rubrica.db",
+          "fetch_rubrica": "Scarica la rubrica dal citofono"
         }
       },
       "settings": {
@@ -97,7 +98,17 @@
       },
       "import_confirm": {
         "title": "Conferma importazione",
-        "description": "Trovati {count} attuatori per il GID {gid}: {names}.\n\nSGA (MAGIC_APT_INTERCOM) rilevato: {sga_info}\n\nConfermando, questa lista SOSTITUISCE gli attuatori attualmente configurati e, se rilevato, aggiorna sga_target/picg_target. Per annullare, chiudi questa finestra senza confermare."
+        "description": "Trovati {count} attuatori per il GID {gid}: {names}.\n\nSGA (MAGIC_APT_INTERCOM) rilevato: {sga_info}\n\nPICG rilevato: {picg_info}\n\nConfermando, questa lista SOSTITUISCE gli attuatori attualmente configurati e, se rilevato, aggiorna sga_target/picg_target. Per annullare, chiudi questa finestra senza confermare."
+      },
+      "fetch_rubrica": {
+        "title": "Scarica dal citofono",
+        "description": "Chiede la rubrica direttamente al citofono ({host}) usando le credenziali SIP già configurate: non serve estrarre il file a mano né un account Vimar. Nella stessa richiesta l'integrazione chiede anche il PICG, che il citofono dichiara da sé.\n\nFunziona se il citofono è raggiungibile in rete locale; se non risponde, usa «Importa attuatori da rubrica.db». {rubrica_error}",
+        "data": {
+          "rubrica_gid": "GID appartamento"
+        },
+        "data_description": {
+          "rubrica_gid": "Il GID dell'appartamento nella rubrica (di solito quello già in uso, es. 101)."
+        }
       }
     },
     "error": {
@@ -106,7 +117,10 @@
       "invalid_actuators": "Lista attuatori non valida: {actuators_error}",
       "rubrica_import_failed": "Importazione fallita. Vedi il dettaglio nella descrizione.",
       "rubrica_no_actuators": "Nessun attuatore trovato per il GID specificato. Vedi la descrizione.",
-      "invalid_target": "Valore non valido: usa solo cifre (es. 55001)."
+      "invalid_target": "Valore non valido: usa solo cifre (es. 55001).",
+      "no_local_proxy": "Manca l'indirizzo del citofono: impostalo in «Impostazioni di rete e attuatori».",
+      "rest_auth_failed": "Il citofono ha rifiutato le credenziali SIP, oppure non espone questa API. Nota: risponde 401 in entrambi i casi.",
+      "rest_unavailable": "Citofono non raggiungibile in HTTP sulla rete locale. Se l'impianto funziona solo via cloud, usa l'importazione da file."
     }
   },
   "entity": {

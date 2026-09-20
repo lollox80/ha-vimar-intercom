@@ -6,6 +6,35 @@ Italian and are kept as they were written.
 
 ## [Unreleased]
 
+### Added
+
+- **The phonebook can now be downloaded from the intercom itself.** Options → *Download the
+  phonebook from the intercom* fetches `rubrica.db` over the intercom's own local HTTP API and
+  imports the actuators, with no file to extract by hand: no rooted phone, no WSA, no adb, no
+  cloud token. Authentication is HTTP Digest with **the SIP credentials the integration already
+  has** in the config entry — no Vimar account is involved, and nothing leaves the local network.
+  The existing *Import actuators from rubrica.db* entry stays: it is the only route for systems
+  that are reachable only through the cloud.
+- **The intercom now tells us its own PICG.** The same step asks
+  `get_info.php?action=nickname`, whose reply carries the `PICG` role and its extension, and
+  offers it as `picg_target` in the confirmation screen. This is the answer to
+  [#10](https://github.com/lollox80/ha-vimar-intercom/issues/10) and makes the scan proposed in
+  [#14](https://github.com/lollox80/ha-vimar-intercom/issues/14) a fallback rather than the plan:
+  the address does not have to be guessed any more. `sga_target` still comes from the phonebook's
+  `SYSTEM.MAGIC_APT_INTERCOM` — two distinct values from two distinct sources, as `runtime.py`
+  always documented.
+- New pure module `rest_client.py` (`requests`, already a requirement; no Home Assistant imports)
+  with `get_status()`, `get_nicknames()`, `download_db()`, `probe()` and the matching parsers.
+  `parse_status()` reads exactly the body of a `GET_INIT_STATUS_REPLY;`, so the SIP and HTTP
+  routes share one parser. 38 new tests in `tests/test_rest_client.py`.
+
+Three quirks of the intercom's HTTP server are handled in `rest_client.py`, and are worth knowing
+before touching it: its Digest `nonce` arrives as the `repr()` of a Python `bytes` object
+(`nonce="b'…'"`) and must be echoed verbatim; responses carry the illegal header
+`Content-Encoding: none`, so the body is read with `decode_content=False`; and **an unknown
+resource is answered with 401, never 404** — a failed download and wrong credentials are
+indistinguishable, which is why `RestAuthError` says both.
+
 ## [1.0.6] - 2026-09-19
 
 The last of the audit findings: the registration state machine, and four ways an

@@ -7,8 +7,10 @@ import hashlib
 import ipaddress
 import json
 import logging
+import os
 import random
 import socket
+import tempfile
 
 import voluptuous as vol
 from homeassistant import config_entries
@@ -19,6 +21,7 @@ from homeassistant.helpers import selector
 
 from .const import DOMAIN, SGA_TARGET, PICG_TARGET
 from . import qr_decoder
+from . import rest_client
 from . import rubrica_import
 
 _LOGGER = logging.getLogger(__name__)
@@ -416,14 +419,17 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         self._rubrica_error: str | None = None
         self._imported: dict | None = None
         self._imported_gid: str = "101"
+        # PICG dichiarato dal citofono stesso (get_info.php?action=nickname).
+        # Resta None quando la rubrica arriva da un file caricato a mano.
+        self._picg_from_rest: str | None = None
 
     async def async_step_init(
         self, user_input: dict | None = None
     ) -> FlowResult:
-        """Menu: modifica impostazioni a mano, oppure importa da rubrica.db."""
+        """Menu: impostazioni a mano, rubrica dal citofono, o file rubrica.db."""
         return self.async_show_menu(
             step_id="init",
-            menu_options=["settings", "import_rubrica"],
+            menu_options=["settings", "fetch_rubrica", "import_rubrica"],
         )
 
     async def async_step_settings(
@@ -544,6 +550,99 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             },
         )
 
+    async def async_step_fetch_rubrica(
+        self, user_input: dict | None = None
+    ) -> FlowResult:
+        """Scarica la rubrica **dal citofono**, senza doverla estrarre a mano.
+
+        Usa l'API HTTP che il citofono espone in rete locale (`rest_client`)
+        con le stesse credenziali SIP già nel config entry: niente token,
+        niente account Vimar, niente cloud. Nella stessa occasione chiede i
+        nickname, così il PICG lo **dichiara il citofono** invece di doverlo
+        indovinare o leggere dalla rubrica.
+
+        Funziona solo se il citofono è raggiungibile in LAN sulla porta 80; per
+        gli impianti che si raggiungono solo dal cloud resta la voce «importa
+        da file».
+        """
+        errors: dict[str, str] = {}
+        current = {**self._entry.data, **self._entry.options}
+        host = (current.get(KEY_LOCAL_PROXY) or "").strip()
+        default_gid = str(current.get(KEY_GID) or "101")
+
+        if not host:
+            # Senza indirizzo del citofono non c'è niente da contattare.
+            errors["base"] = "no_local_proxy"
+        elif user_input is not None:
+            gid = (user_input.get("rubrica_gid") or default_gid).strip() or default_gid
+            sip_user = current.get(KEY_SIP_USER, "")
+            sip_password = current.get(KEY_SIP_PASSWORD, "")
+
+            def _fetch() -> tuple[dict, str | None]:
+                """Scarica, legge, ripulisce. Tutto bloccante, quindi executor."""
+                fd, path = tempfile.mkstemp(suffix=".db", prefix="vimar_rubrica_")
+                os.close(fd)
+                try:
+                    rest_client.download_db(
+                        host, sip_user, sip_password, rest_client.DB_RUBRICA, dest=path
+                    )
+                    parsed = rubrica_import.parse_rubrica_file(path, gid)
+                finally:
+                    try:
+                        os.unlink(path)
+                    except OSError:  # pragma: no cover — file già rimosso
+                        pass
+
+                # I nickname sono un di più: se non arrivano, l'import della
+                # rubrica resta valido e il PICG rimane quello configurato.
+                picg: str | None = None
+                try:
+                    picg = rest_client.find_picg(
+                        rest_client.get_nicknames(host, sip_user, sip_password)
+                    )
+                except rest_client.RestError:
+                    _LOGGER.debug("nickname non disponibili da %s", host)
+                return parsed, picg
+
+            try:
+                result, picg = await self.hass.async_add_executor_job(_fetch)
+            except rest_client.RestAuthError as exc:
+                errors["base"] = "rest_auth_failed"
+                self._rubrica_error = str(exc)
+            except rest_client.RestUnavailable as exc:
+                errors["base"] = "rest_unavailable"
+                self._rubrica_error = str(exc)
+            except (rest_client.RestError, rubrica_import.RubricaImportError,
+                    ValueError, OSError) as exc:
+                errors["base"] = "rubrica_import_failed"
+                self._rubrica_error = str(exc)
+            else:
+                if not result["actuators"]:
+                    errors["base"] = "rubrica_no_actuators"
+                    self._rubrica_error = (
+                        f"Rubrica scaricata, ma nessun attuatore per il GID {gid}."
+                    )
+                else:
+                    self._imported = result
+                    self._imported_gid = gid
+                    self._picg_from_rest = picg
+                    return await self.async_step_import_confirm()
+
+        return self.async_show_form(
+            step_id="fetch_rubrica",
+            data_schema=vol.Schema({
+                vol.Optional(
+                    "rubrica_gid",
+                    default=(user_input or {}).get("rubrica_gid") or default_gid,
+                ): str,
+            }),
+            errors=errors,
+            description_placeholders={
+                "host": host or "—",
+                "rubrica_error": self._rubrica_error or "",
+            },
+        )
+
     async def async_step_import_rubrica(
         self, user_input: dict | None = None
     ) -> FlowResult:
@@ -611,12 +710,19 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         sga = result.get("sga")
 
         if user_input is not None:
-            # Se rubrica.db riporta un SGA, sostituisce il valore corrente di
-            # sga_target/picg_target (coincidono su tutti gli impianti finora
-            # verificati — vedi nota in runtime.py); altrimenti resta quello già
-            # configurato (manuale o default storico).
+            # Due fonti distinte per due valori distinti, finalmente:
+            #   sga_target  ← SYSTEM.MAGIC_APT_INTERCOM della rubrica
+            #   picg_target ← il ruolo PICG dichiarato dal citofono nei nickname
+            # Quando la rubrica arriva da un file caricato a mano i nickname non
+            # ci sono, e allora il PICG ricade sull'SGA come prima. Se manca
+            # tutto, resta il valore già configurato.
             new_sga  = sga or current.get(KEY_SGA_TARGET) or SGA_TARGET
-            new_picg = sga or current.get(KEY_PICG_TARGET) or PICG_TARGET
+            new_picg = (
+                self._picg_from_rest
+                or sga
+                or current.get(KEY_PICG_TARGET)
+                or PICG_TARGET
+            )
             return self.async_create_entry(
                 title="",
                 data={
@@ -641,6 +747,18 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         else:
             sga_info = "non trovato (tabella SYSTEM assente o senza MAGIC_APT_INTERCOM); resta invariato quello già configurato."
 
+        current_picg = current.get(KEY_PICG_TARGET) or PICG_TARGET
+        if self._picg_from_rest and self._picg_from_rest != current_picg:
+            picg_info = (
+                f"{self._picg_from_rest} — dichiarato dal citofono stesso, "
+                f"diverso da quello configurato ({current_picg}); confermando "
+                "verrà impostato come nuovo picg_target."
+            )
+        elif self._picg_from_rest:
+            picg_info = f"{self._picg_from_rest} — dichiarato dal citofono, coincide con quello già in uso."
+        else:
+            picg_info = "non richiesto (rubrica da file): resta quello già configurato."
+
         return self.async_show_form(
             step_id="import_confirm",
             data_schema=vol.Schema({}),
@@ -649,5 +767,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 "names": ", ".join(a["name"] for a in actuators) or "—",
                 "gid": self._imported_gid,
                 "sga_info": sga_info,
+                "picg_info": picg_info,
             },
         )

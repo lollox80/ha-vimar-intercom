@@ -62,7 +62,8 @@
         "title": "Vimar Intercom settings",
         "menu_options": {
           "settings": "Network and actuator settings",
-          "import_rubrica": "Import actuators from rubrica.db"
+          "import_rubrica": "Import actuators from rubrica.db",
+          "fetch_rubrica": "Download the phonebook from the intercom"
         }
       },
       "settings": {
@@ -97,7 +98,17 @@
       },
       "import_confirm": {
         "title": "Confirm import",
-        "description": "Found {count} actuators for GID {gid}: {names}.\n\nDetected SGA (MAGIC_APT_INTERCOM): {sga_info}\n\nConfirming REPLACES the currently configured actuators and, when detected, updates sga_target/picg_target. To cancel, close this window without confirming."
+        "description": "Found {count} actuators for GID {gid}: {names}.\n\nDetected SGA (MAGIC_APT_INTERCOM): {sga_info}\n\nPICG detected: {picg_info}\n\nConfirming REPLACES the currently configured actuators and, when detected, updates sga_target/picg_target. To cancel, close this window without confirming."
+      },
+      "fetch_rubrica": {
+        "title": "Download from the intercom",
+        "description": "Asks the intercom ({host}) for the phonebook directly, using the SIP credentials already configured: no manual extraction and no Vimar account needed. The same request also asks for the PICG, which the intercom reports itself.\n\nThis works when the intercom is reachable on the local network; if it does not answer, use \"Import actuators from rubrica.db\". {rubrica_error}",
+        "data": {
+          "rubrica_gid": "Apartment GID"
+        },
+        "data_description": {
+          "rubrica_gid": "The apartment GID in the phonebook (usually the one already in use, e.g. 101)."
+        }
       }
     },
     "error": {
@@ -106,7 +117,10 @@
       "invalid_actuators": "Invalid actuators list: {actuators_error}",
       "rubrica_import_failed": "Import failed. See description above for details.",
       "rubrica_no_actuators": "No actuators found for the specified GID. See description above.",
-      "invalid_target": "Invalid value: digits only (e.g. 55001)."
+      "invalid_target": "Invalid value: digits only (e.g. 55001).",
+      "no_local_proxy": "The intercom address is missing: set it under \"Network settings and actuators\".",
+      "rest_auth_failed": "The intercom rejected the SIP credentials, or does not expose this API. Note: it answers 401 in both cases.",
+      "rest_unavailable": "The intercom is not reachable over HTTP on the local network. If the system only works through the cloud, use the file import instead."
     }
   },
   "entity": {
