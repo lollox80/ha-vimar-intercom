@@ -699,6 +699,26 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             },
         )
 
+    def _confirm_picg(self, current: dict, sga: str | None) -> str:
+        """Il picg_target che la conferma salverà — unica fonte per riepilogo e salvataggio.
+
+        In ordine: il PICG dichiarato dal citofono (rubrica scaricata, nickname
+        disponibili); altrimenti quello già configurato, che un import da file
+        non deve toccare perché il file non dice nulla sul PICG; solo se non ne
+        è configurato nessuno, l'SGA della rubrica (sugli impianti visti finora
+        coincidono), e infine il default.
+
+        Prima della correzione il riepilogo prometteva «resta quello già
+        configurato» mentre il salvataggio lo sovrascriveva con l'SGA: un 60001
+        messo a mano per un 2FV2 diventava 55001.
+        """
+        return (
+            self._picg_from_rest
+            or current.get(KEY_PICG_TARGET)
+            or sga
+            or PICG_TARGET
+        )
+
     async def async_step_import_confirm(
         self, user_input: dict | None = None
     ) -> FlowResult:
@@ -710,19 +730,11 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         sga = result.get("sga")
 
         if user_input is not None:
-            # Due fonti distinte per due valori distinti, finalmente:
+            # Due fonti distinte per due valori distinti:
             #   sga_target  ← SYSTEM.MAGIC_APT_INTERCOM della rubrica
             #   picg_target ← il ruolo PICG dichiarato dal citofono nei nickname
-            # Quando la rubrica arriva da un file caricato a mano i nickname non
-            # ci sono, e allora il PICG ricade sull'SGA come prima. Se manca
-            # tutto, resta il valore già configurato.
             new_sga  = sga or current.get(KEY_SGA_TARGET) or SGA_TARGET
-            new_picg = (
-                self._picg_from_rest
-                or sga
-                or current.get(KEY_PICG_TARGET)
-                or PICG_TARGET
-            )
+            new_picg = self._confirm_picg(current, sga)
             return self.async_create_entry(
                 title="",
                 data={
@@ -747,17 +759,25 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         else:
             sga_info = "non trovato (tabella SYSTEM assente o senza MAGIC_APT_INTERCOM); resta invariato quello già configurato."
 
-        current_picg = current.get(KEY_PICG_TARGET) or PICG_TARGET
-        if self._picg_from_rest and self._picg_from_rest != current_picg:
+        configured_picg = current.get(KEY_PICG_TARGET)
+        new_picg = self._confirm_picg(current, sga)
+        if self._picg_from_rest and self._picg_from_rest != (configured_picg or PICG_TARGET):
             picg_info = (
                 f"{self._picg_from_rest} — dichiarato dal citofono stesso, "
-                f"diverso da quello configurato ({current_picg}); confermando "
-                "verrà impostato come nuovo picg_target."
+                f"diverso da quello configurato ({configured_picg or PICG_TARGET}); "
+                "confermando verrà impostato come nuovo picg_target."
             )
         elif self._picg_from_rest:
             picg_info = f"{self._picg_from_rest} — dichiarato dal citofono, coincide con quello già in uso."
+        elif configured_picg:
+            picg_info = (
+                f"non richiesto (rubrica da file): resta quello già configurato ({configured_picg})."
+            )
         else:
-            picg_info = "non richiesto (rubrica da file): resta quello già configurato."
+            picg_info = (
+                f"non richiesto (rubrica da file) e non ancora configurato: verrà impostato "
+                f"uguale all'SGA ({new_picg})."
+            )
 
         return self.async_show_form(
             step_id="import_confirm",
