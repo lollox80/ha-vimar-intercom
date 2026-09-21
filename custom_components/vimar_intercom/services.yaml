@@ -101,3 +101,69 @@ fetch_local:
       default: http
       selector:
         text:
+
+find_sga:
+  name: Cerca SGA/PICG
+  description: >-
+    Chiede GET_NICKS (Panda: blue) agli indirizzi indicati, uno alla volta, e si
+    ferma quando il citofono risponde con GET_NICKS_REPLY: la voce con ruolo PICG
+    e' il capogruppo dell'impianto. Serve quando non conosci l'SGA e non hai la
+    rubrica (impianti solo-cloud, issue #14). Sull'impianto di riferimento
+    GET_NICKS non fa comparire notifiche sull'app; su altri impianti non e'
+    ancora verificato. Non modifica la configurazione, salvo "Applica".
+  fields:
+    start:
+      name: Primo indirizzo
+      description: Inizio dell'intervallo (compreso).
+      default: "55000"
+      example: "55000"
+      selector:
+        text:
+    end:
+      name: Ultimo indirizzo
+      description: Fine dell'intervallo (compreso). Al massimo 50 indirizzi.
+      default: "55010"
+      example: "55010"
+      selector:
+        text:
+    targets:
+      name: Indirizzi precisi
+      description: >-
+        In alternativa all'intervallo, una lista separata da virgole
+        (es. 55001, 55002, 55100). Se indicata, start/end vengono ignorati.
+      example: "55001, 55002"
+      selector:
+        text:
+    delay:
+      name: Pausa tra le sonde (s)
+      default: 1.0
+      selector:
+        number:
+          min: 0.2
+          max: 10
+          step: 0.1
+          unit_of_measurement: s
+    reply_wait:
+      name: Attesa della risposta (s)
+      default: 3.0
+      selector:
+        number:
+          min: 1
+          max: 15
+          step: 0.5
+          unit_of_measurement: s
+    apply:
+      name: Applica come PICG
+      description: Se trovato, scrive il PICG in picg_target (l'integrazione si ricarica).
+      default: false
+      selector:
+        boolean:
+    apply_sga:
+      name: Applica anche come SGA
+      description: >-
+        Se trovato, scrive lo stesso indirizzo anche in sga_target (destinatario
+        di segreteria, non disturbare e apri-porta). Sugli impianti visti finora
+        coincidono; sono comunque due valori distinti.
+      default: false
+      selector:
+        boolean:

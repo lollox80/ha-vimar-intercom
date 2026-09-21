@@ -113,6 +113,7 @@ tuo impianto o vuoi modificare la lista attuatori prodotta dall'import).
 | `vimar_intercom.hangup` | Termina la chiamata attiva | — |
 | `vimar_intercom.open_door` | Comando di apertura (`OPEN_2F`) | `target`, `command` |
 | `vimar_intercom.fetch_local` | GET HTTP Digest verso l'interfaccia locale del Tab (home mode) | `path`, `save_as`, `host`, `scheme` |
+| `vimar_intercom.find_sga` | Cerca il PICG mandando `GET_NICKS` a un intervallo di indirizzi (issue #14) | `start`, `end`, `targets`, `delay`, `reply_wait`, `apply`, `apply_sga` |
 
 Esempio (Strumenti per sviluppatori → Azioni):
 

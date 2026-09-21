@@ -235,6 +235,40 @@
           "description": "Comando di apertura"
         }
       }
+    },
+    "find_sga": {
+      "name": "Cerca SGA/PICG",
+      "description": "Chiede GET_NICKS (Panda: blue) agli indirizzi indicati, uno alla volta, e si ferma quando il citofono risponde con GET_NICKS_REPLY: la voce con ruolo PICG è il capogruppo dell'impianto. Serve quando non conosci l'SGA e non hai la rubrica (impianti solo-cloud, issue #14). Sull'impianto di riferimento GET_NICKS non fa comparire notifiche sull'app; su altri impianti non è ancora verificato. Non modifica la configurazione, salvo «Applica».",
+      "fields": {
+        "start": {
+          "name": "Primo indirizzo",
+          "description": "Inizio dell'intervallo (compreso)."
+        },
+        "end": {
+          "name": "Ultimo indirizzo",
+          "description": "Fine dell'intervallo (compreso). Al massimo 50 indirizzi."
+        },
+        "targets": {
+          "name": "Indirizzi precisi",
+          "description": "In alternativa all'intervallo, una lista separata da virgole (es. 55001, 55002, 55100). Se indicata, start/end vengono ignorati."
+        },
+        "delay": {
+          "name": "Pausa tra le sonde",
+          "description": "Secondi tra una sonda e la successiva."
+        },
+        "reply_wait": {
+          "name": "Attesa della risposta",
+          "description": "Secondi di attesa di GET_NICKS_REPLY dopo ogni sonda accettata."
+        },
+        "apply": {
+          "name": "Applica come PICG",
+          "description": "Se trovato, lo scrive in picg_target (l'integrazione si ricarica)."
+        },
+        "apply_sga": {
+          "name": "Applica anche come SGA",
+          "description": "Se trovato, scrive lo stesso indirizzo anche in sga_target (destinatario di segreteria, non disturbare e apri-porta). Sugli impianti visti finora coincidono; sono comunque due valori distinti."
+        }
+      }
     }
   }
 }

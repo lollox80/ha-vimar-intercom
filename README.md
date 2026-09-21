@@ -101,11 +101,21 @@ Settings → Vimar Intercom → **Configure**:
 | **SGA** (`sga_target`) | Recipient of `VOICEMAIL;`/`DND;` and of the "AUTO" door open. Empty = default `55001` |
 | **PICG** (`picg_target`) | Recipient of `GET_INIT_STATUS`. On every plant verified so far it matches the SGA. Empty = default `55001` |
 
-The actuator list and the SGA/PICG values come from your plant's **phonebook** (`rubrica.db`): in the
-options menu pick **"Import actuators from rubrica.db"**, upload the file (you can get it through the
-VIEW app or with root access, see `docs/RUBRICA.md`) and confirm — actuators, SGA and PICG are then
-set automatically. You can also enter the values by hand in the "Settings" step, which is handy if you
-already know your plant's SGA or want to tweak the imported actuator list.
+The actuator list and the SGA/PICG values come from your plant's **phonebook** (`rubrica.db`). There are
+three ways to get them, from the most to the least convenient:
+
+1. **"Download the phonebook from the intercom"** in the options menu (1.0.7+). If the Tab is reachable on
+   your local network, the integration asks it for `rubrica.db` over its own HTTP API, using the SIP
+   credentials it already has, and the Tab declares its PICG in the same step. Nothing to extract by hand.
+2. **"Import actuators from rubrica.db"**: upload a file you extracted yourself (through the VIEW app or
+   with root access, see `docs/RUBRICA.md`).
+3. **The `vimar_intercom.find_sga` action** (1.0.8+), for cloud-only systems with no phonebook at hand:
+   it sends `GET_NICKS` to a small range of addresses until the intercom answers, and the answer names
+   the PICG (see *Services* below).
+
+With 1 and 2, actuators, SGA and PICG are set automatically after you confirm. You can also enter the
+values by hand in the "Settings" step, which is handy if you already know your plant's SGA or want to
+tweak the imported actuator list.
 
 ---
 
@@ -149,6 +159,7 @@ already know your plant's SGA or want to tweak the imported actuator list.
 | `vimar_intercom.hangup` | Ends the active call | — |
 | `vimar_intercom.open_door` | Door open command (`OPEN_2F`) | `target`, `command` |
 | `vimar_intercom.fetch_local` | HTTP Digest GET against the Tab's local interface (home mode) | `path`, `save_as`, `host`, `scheme` |
+| `vimar_intercom.find_sga` | Finds the PICG by sending `GET_NICKS` to a range of addresses (issue #14) | `start`, `end`, `targets`, `delay`, `reply_wait`, `apply`, `apply_sga` |
 
 Example (Developer tools → Actions):
 
@@ -160,6 +171,25 @@ data:
   header_name: Panda
   header_value: command
 ```
+
+**Finding the SGA/PICG without the phonebook** — `find_sga` probes one address at a time (default
+`55000`–`55010`, at most 50) and stops at the first `GET_NICKS_REPLY`; the entry with role `PICG` is
+the answer. It changes nothing unless you set `apply` (writes `picg_target`) and/or `apply_sga` (also
+writes `sga_target`); the integration then reloads.
+
+```yaml
+action: vimar_intercom.find_sga
+data:
+  start: "55000"
+  end: "55010"
+response_variable: result
+```
+
+The response lists every probe with its outcome — `absent` (404: no such address), `exists`
+(accepted, but no reply), `replied`, `no_response`, `error` — plus `picg` and the nicknames the
+intercom declared. `GET_NICKS` raised no notification in the VIEW app on the reference system,
+unlike `GET_INIT_STATUS`, which shows "Configurazione appartamento modificata" every time; on other
+systems this is not verified yet.
 
 ---
 

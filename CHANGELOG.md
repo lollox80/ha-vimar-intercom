@@ -6,6 +6,24 @@ Italian and are kept as they were written.
 
 ## [Unreleased]
 
+### Added
+
+- **`vimar_intercom.find_sga`: find the PICG without the phonebook**
+  ([#14](https://github.com/lollox80/ha-vimar-intercom/issues/14)). For cloud-only systems, where
+  neither the phonebook nor the intercom's local HTTP API is at hand. The action sends `GET_NICKS`
+  (`Panda: blue`) to a small range of addresses — default `55000`–`55010`, at most 50, one at a time
+  with a pause — and stops at the first `GET_NICKS_REPLY`: the intercom declares its own PICG there.
+  Each probe is reported with the three-outcome rule (`absent` for a 404, `exists` for an accepted
+  message with no reply, `replied`). A reply that arrives late, after the probe's wait window, still
+  counts: the PICG is named by the reply's content, not by who sent it. Nothing is written to the
+  configuration unless `apply` / `apply_sga` is set.
+- It probes with `GET_NICKS` rather than `GET_INIT_STATUS` because on the reference system the
+  latter makes the VIEW app show "Configurazione appartamento modificata" on every send, while
+  `GET_NICKS` raised no notification in two tests.
+- `GET_NICKS_REPLY` is now parsed wherever it arrives: the declared nicknames and PICG are kept in
+  the hub's stats. The parser recovers the complete entries of a truncated reply.
+- README: the three ways to get SGA/PICG, including the phonebook download added in 1.0.7.
+
 ## [1.0.7] - 2026-09-21
 
 Stability release from a full debug pass against the decompiled VIEW app, the SIP logs of
