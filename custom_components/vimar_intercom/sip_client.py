@@ -651,6 +651,72 @@ async def reader_task():
                 await incoming_requests.put(raw)
 
 
+def _clen(body: str) -> int:
+    """`Content-Length` di un corpo: in **byte**, non in caratteri.
+
+    Fino alla 1.0.6 era `len(body)`: con un corpo non ASCII (`NICK;Cucina è`) si
+    dichiaravano 13 byte e se ne spedivano 14. In UDP il corpo arrivava troncato; in
+    TCP/TLS il byte in più veniva letto come inizio del messaggio successivo.
+    """
+    return len(body.encode("utf-8"))
+
+
+# Ritrasmissione delle richieste non-INVITE su UDP (RFC 3261 §17.1.2.2, Timer E).
+# L'app ufficiale non ne ha bisogno perché in locale usa TCP; noi usiamo UDP, e
+# fino alla 1.0.6 ogni richiesta partiva una volta sola: un datagramma perso dava
+# «REGISTER: nessuna risposta finale utile (0 risposte)» e due minuti di
+# «Non registrato» fino al giro successivo del keepalive.
+_T1 = 0.5   # primo intervallo di ritrasmissione (s)
+_T2 = 4.0   # intervallo massimo (s)
+
+
+async def _send_request(msg: str, cid: str, timeout: float = 15) -> list[str]:
+    """Invia una richiesta non-INVITE e ne raccoglie le risposte fino alla finale.
+
+    Due differenze rispetto a `send()` + `_wait_final()`:
+
+    * la coda delle risposte esiste **prima** dell'invio: il reader scarta come
+      «stale» le risposte di un Call-ID senza coda, e il citofono risponde in
+      poche decine di millisecondi;
+    * su UDP la richiesta viene **ritrasmessa identica** (stesso branch, quindi la
+      stessa transazione per il server) a 0,5 - 1 - 2 - 4 - 4 … secondi, finché non
+      arriva una risposta qualsiasi. Su TCP/TLS il trasporto è affidabile e non si
+      ritrasmette.
+    """
+    q = pending_responses.setdefault(cid, asyncio.Queue())
+    loop = asyncio.get_running_loop()
+    await send(msg)
+    deadline = loop.time() + timeout
+    retransmit = bool(R.USE_LOCAL_UDP)
+    interval = _T1
+    next_tx = loop.time() + interval
+    results: list[str] = []
+    try:
+        while True:
+            now = loop.time()
+            if now >= deadline:
+                break
+            wake = min(deadline, next_tx) if retransmit else deadline
+            try:
+                raw = await asyncio.wait_for(q.get(), timeout=max(0.0, wake - now))
+            except asyncio.TimeoutError:
+                if retransmit and loop.time() >= next_tx and loop.time() < deadline:
+                    interval = min(interval * 2, _T2)
+                    next_tx = loop.time() + interval
+                    _LOGGER.debug("ritrasmissione cid=%s (prossima tra %.1fs)", cid[:24], interval)
+                    await send(msg)
+                continue
+            results.append(raw)
+            # Una risposta, anche provvisoria, dice che la richiesta è arrivata.
+            retransmit = False
+            kind = _parse(raw)[0]
+            if isinstance(kind, int) and kind >= 200:
+                break
+    finally:
+        pending_responses.pop(cid, None)
+    return results
+
+
 async def _wait_final(cid, timeout=15):
     q = pending_responses.setdefault(cid, asyncio.Queue())
     results = []
@@ -804,8 +870,7 @@ async def do_register():
         return m + "Content-Length: 0\r\n\r\n"
 
     s1 = _next_cseq()
-    await send(_msg(seq=s1))
-    resps = await _wait_final(cid)
+    resps = await _send_request(_msg(seq=s1), cid)
 
     # Ogni uscita negativa deve azzerare `registered`: e' anche il keepalive a
     # chiamare questa funzione, e fino alla 1.0.5 un fallimento lasciava il flag
@@ -820,8 +885,7 @@ async def do_register():
                 _set_registered(False)
                 return False
             auth = _make_auth("REGISTER", uri, ch)
-            await send(_msg(auth=auth, seq=_next_cseq()))
-            for r2 in await _wait_final(cid):
+            for r2 in await _send_request(_msg(auth=auth, seq=_next_cseq()), cid):
                 if _parse(r2)[0] == 200:
                     _set_registered(True)
                     _LOGGER.info("SIP registered successfully")
@@ -833,7 +897,15 @@ async def do_register():
             _set_registered(True)
             _LOGGER.info("SIP registered successfully")
             return True
-    _LOGGER.warning("REGISTER: nessuna risposta finale utile (%d risposte)", len(resps))
+    # Diagnostica: "0 risposte" = nulla è tornato nemmeno dopo le ritrasmissioni;
+    # altrimenti diciamo quali codici sono arrivati, che prima non si leggevano.
+    codes = [_parse(r)[0] for r in resps]
+    _LOGGER.warning(
+        "REGISTER: nessuna risposta finale utile (%d risposte%s) verso %s via %s",
+        len(resps), f": {codes}" if codes else "",
+        R.LOCAL_PROXY if R.USE_LOCAL_UDP else R.SIP_PROXY,
+        "UDP" if R.USE_LOCAL_UDP else "TLS",
+    )
     _set_registered(False)
     return False
 
@@ -867,11 +939,10 @@ async def do_system_message(target_uri, body_text, extra_headers=None):
         if auth:
             m += f"Proxy-Authorization: {auth}\r\n"
         m += (f"Content-Type: text/plain\r\n"
-              f"Content-Length: {len(body_text)}\r\n\r\n{body_text}")
+              f"Content-Length: {_clen(body_text)}\r\n\r\n{body_text}")
         return m
 
-    await send(_msg(seq=_next_cseq()))
-    for r in await _wait_final(cid, timeout=15):
+    for r in await _send_request(_msg(seq=_next_cseq()), cid, timeout=15):
         code, hdrs, *_ = _parse(r)
         _LOGGER.info("do_system_message: response %s for %s", code, target_uri)
         if code and code < 200:
@@ -881,8 +952,7 @@ async def do_system_message(target_uri, body_text, extra_headers=None):
             if not ch:
                 return False, f"Auth vuoto ({code})"
             auth = _make_auth("MESSAGE", target_uri, ch)
-            await send(_msg(auth=auth, seq=_next_cseq()))
-            for r2 in await _wait_final(cid, timeout=15):
+            for r2 in await _send_request(_msg(auth=auth, seq=_next_cseq()), cid, timeout=15):
                 c2 = _parse(r2)[0]
                 _LOGGER.info("do_system_message: auth response %s for %s", c2, target_uri)
                 if c2 and 200 <= c2 < 300:
@@ -941,7 +1011,7 @@ async def do_call(target=None):
               f"MyName: {C.MY_NAME}\r\n"
               f"X-Call-ID: {vimar_callid}\r\n"
               f"Content-Type: application/sdp\r\n"
-              f"Content-Length: {len(sdp)}\r\n\r\n{sdp}")
+              f"Content-Length: {_clen(sdp)}\r\n\r\n{sdp}")
         return m
 
     def _ack(to_tag, seq):
@@ -1074,7 +1144,7 @@ async def send_keyframe_request():
         if auth:
             m += f"Proxy-Authorization: {auth}\r\n"
         m += (f"Content-Type: application/media_control+xml\r\n"
-              f"Content-Length: {len(body)}\r\n\r\n{body}")
+              f"Content-Length: {_clen(body)}\r\n\r\n{body}")
         return m
 
     # Registra la coda PRIMA di inviare: la risposta arriva sul Call-ID del
@@ -1085,31 +1155,47 @@ async def send_keyframe_request():
     _LOGGER.debug("Sent INFO picture_fast_update → %s", info_target)
 
     # Attendi risposta breve; su 407/401 rimanda con auth (una volta sola).
-    deadline = time.time() + 3
-    while time.time() < deadline:
-        try:
-            raw = await asyncio.wait_for(pending_responses[cid].get(), timeout=1)
-        except (asyncio.TimeoutError, KeyError):
-            break
-        code, hdrs, *_ = _parse(raw)
-        # Ignora risposte che non sono per il nostro INFO (es. 200 al BYE se
-        # un hangup concorrente condivide la coda del dialog): rimettile.
-        if "INFO" not in hdrs.get("cseq", "INFO"):
+    #
+    # Le risposte che non sono per il nostro INFO (es. il 200 di un BYE, se un
+    # hangup concorrente condivide la coda del dialog) vanno restituite alla coda,
+    # ma solo **dopo** il ciclo. Fino alla 1.0.6 venivano rimesse in coda subito e
+    # rilette al giro successivo: da Python 3.12 `asyncio.wait_for` su una coda già
+    # piena non sospende, quindi il ciclo girava senza mai cedere l'event loop fino
+    # alla scadenza — Home Assistant fermo 3 secondi, ogni 5 secondi, per tutta la
+    # chiamata (misurato: 0,01 s su 3.11, 3,01 s su 3.12 e 3.13).
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 3
+    foreign: list[str] = []
+    try:
+        while loop.time() < deadline:
             try:
-                pending_responses[cid].put_nowait(raw)
-            except (KeyError, asyncio.QueueFull):
-                pass
-            continue
-        if not isinstance(code, int) or code < 200:
-            continue
-        if code in (401, 407):
-            ch = hdrs.get("proxy-authenticate", "") or hdrs.get("www-authenticate", "")
-            if ch:
-                auth = _make_auth("INFO", info_target, ch)
-                await send(_info(auth=auth))
-                _LOGGER.debug("Re-sent INFO with Proxy-Authorization after %d", code)
+                raw = await asyncio.wait_for(
+                    pending_responses[cid].get(), timeout=min(1.0, deadline - loop.time())
+                )
+            except (asyncio.TimeoutError, KeyError):
+                break
+            code, hdrs, *_ = _parse(raw)
+            if "INFO" not in hdrs.get("cseq", "INFO"):
+                foreign.append(raw)
+                continue
+            if not isinstance(code, int) or code < 200:
+                continue
+            if code in (401, 407):
+                ch = hdrs.get("proxy-authenticate", "") or hdrs.get("www-authenticate", "")
+                if ch:
+                    auth = _make_auth("INFO", info_target, ch)
+                    await send(_info(auth=auth))
+                    _LOGGER.debug("Re-sent INFO with Proxy-Authorization after %d", code)
             break
-        break
+    finally:
+        queue = pending_responses.get(cid)
+        for raw in foreign:
+            if queue is None:
+                break
+            try:
+                queue.put_nowait(raw)
+            except asyncio.QueueFull:
+                break
     # Nota: NON facciamo pop() qui — un do_call/_wait_final concorrente potrebbe
     # possedere la stessa coda. La coda del dialog viene ripulita a hangup.
 
@@ -1295,7 +1381,7 @@ async def do_answer_incoming():
         f"Call-ID: {p['cid']}\r\nCSeq: {p['cseq']}\r\n"
         f"Contact: {_simple_contact()}\r\n"
         f"Content-Type: application/sdp\r\n"
-        f"Content-Length: {len(sdp)}\r\n\r\n{sdp}")
+        f"Content-Length: {_clen(sdp)}\r\n\r\n{sdp}")
 
     _set_in_call(True)
     call_state["call_id"] = p["cid"]

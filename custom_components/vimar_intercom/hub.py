@@ -559,7 +559,15 @@ class VimarIntercomHub:
             uri = target
         else:
             uri = sip_uri(target)
-        headers = {header_name: header_value} if header_name else None
+        # Header solo se nome e valore ci sono entrambi: fino alla 1.0.6 un
+        # header_value vuoto dal servizio diventava None e partiva «Panda: None».
+        # CR/LF vengono rifiutati: finirebbero dentro il messaggio SIP come
+        # righe di header aggiuntive.
+        name = (header_name or "").strip()
+        value = (header_value or "").strip()
+        if any(c in name + value for c in "\r\n"):
+            return False, "header_name/header_value non possono contenere a capo"
+        headers = {name: value} if name and value else None
         _LOGGER.info("Custom command: uri=%s body=%r headers=%s", uri, body, headers)
         try:
             ok, msg = await sip.do_system_message(uri, body, extra_headers=headers)
@@ -867,10 +875,17 @@ class VimarIntercomHub:
             try:
                 j = json.loads(payload)
                 if isinstance(j, dict):
-                    data["sip_id"] = j.get("SIP_ID") or j.get("sip_id")
-                    data["reason"] = j.get("REASON") or j.get("reason")
-                    data["media_type"] = j.get("MEDIA_TYPE") or j.get("media_type")
-                    data["video_src"] = j.get("VIDEO_SRC") or j.get("video_src")
+                    # `is not None`, non `or`: 0 è un valore significativo in tre
+                    # campi su quattro — MEDIA_TYPE 0 = audio, REASON 0 = rifiutata,
+                    # VIDEO_SRC 0 = sorgente non commutabile. Con `or` fino alla
+                    # 1.0.6 diventavano None (MsgCallInfoReceiver.java dell'app).
+                    def _pick(upper: str, lower: str):
+                        value = j.get(upper)
+                        return j.get(lower) if value is None else value
+                    data["sip_id"] = _pick("SIP_ID", "sip_id")
+                    data["reason"] = _pick("REASON", "reason")
+                    data["media_type"] = _pick("MEDIA_TYPE", "media_type")
+                    data["video_src"] = _pick("VIDEO_SRC", "video_src")
             except Exception:
                 _LOGGER.debug("CALL_INFO payload non-JSON: %r", payload[:120])
         self.stats["last_call_info"] = data
@@ -878,10 +893,16 @@ class VimarIntercomHub:
         self._fire_event(C.EVENT_CALL_INFO, data)
 
     def _handle_new_phonebook(self, raw: str) -> None:
-        # NEW_PHONEBOOK;<gid>;<ver>
+        # NEW_PHONEBOOK;<ver>;<gid> — la versione (MD5 del file, = rubrica_ver)
+        # viene PRIMA del gid. Fino alla 1.0.6 li leggevamo al contrario, seguendo
+        # la nostra documentazione che diceva «da confermare sul campo»: il sensore
+        # Versione Rubrica prendeva il GID, e al GET_INIT_STATUS_REPLY successivo
+        # il valore «cambiava» di nuovo, con un secondo phonebook_changed spurio.
+        # Ordine verificato nel sorgente dell'app (MsgNewPhonebookReceiver:
+        # getOrNull(…, 0) = phonebookVersion, getOrNull(…, 1) = gid).
         parts = raw.split(";")
-        gid = parts[1].strip() if len(parts) > 1 else None
-        ver = parts[2].strip() if len(parts) > 2 else None
+        ver = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
+        gid = parts[2].strip() if len(parts) > 2 and parts[2].strip() else None
         _LOGGER.info("NEW_PHONEBOOK gid=%s ver=%s", gid, ver)
         # Aggiorna rubrica_ver ed emette phonebook_changed (anche se primo valore,
         # NEW_PHONEBOOK è per definizione un cambio → forziamo l'evento).

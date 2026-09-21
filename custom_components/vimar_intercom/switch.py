@@ -107,6 +107,17 @@ class VimarModeSwitch(SwitchEntity, RestoreEntity):
         return real if real is not None else self._is_on
 
     @property
+    def assumed_state(self) -> bool:
+        """Vero finché il Tab non ha mai annunciato lo stato (issue #9).
+
+        In quel caso lo stato mostrato è una supposizione — ripristinata dal
+        riavvio precedente o dedotta dall'ultimo comando riuscito — e Home
+        Assistant lo segnala mostrando i due pulsanti on/off al posto
+        dell'interruttore, invece di presentarla come un fatto.
+        """
+        return self._real() is None
+
+    @property
     def extra_state_attributes(self) -> dict:
         return {
             "target": self._target,
@@ -128,8 +139,13 @@ class VimarModeSwitch(SwitchEntity, RestoreEntity):
             body=body, target=self._target,
             header_name=self._hname or None, header_value=self._hvalue or None)
         self._last_result = msg
-        if self._real() is None:
-            self._is_on = new_state  # ottimistico solo finché non arriva l'annuncio
+        # Fino alla 1.0.6 lo stato cambiava anche a comando fallito (404, timeout,
+        # «Non registrato»): lo switch mostrava ON con la segreteria spenta, e
+        # senza un annuncio del Tab a smentirlo lo stato falso sopravviveva anche
+        # al riavvio (RestoreEntity). Ora solo un invio riuscito sposta lo stato
+        # supposto; quello reale arriva comunque dall'annuncio VOICEMAIL;/DND;.
+        if ok and self._real() is None:
+            self._is_on = new_state
         _LOGGER.info("%s %s → ok=%s msg=%s", self._attr_name,
                      "ON" if new_state else "OFF", ok, msg)
         self.async_write_ha_state()

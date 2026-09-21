@@ -186,14 +186,17 @@ automation:
 
 ## Logging
 
-Il componente tiene un buffer circolare interno (`_debug_log`, in `__init__.py`) per la propria
-diagnostica, e per riempirlo alza il proprio logger a `DEBUG`. Di base questo farebbe propagare
-ogni riga `DEBUG` anche al log di Home Assistant, scavalcando il livello impostato in `logger:`
-nella `configuration.yaml` (i logger Python propagano al root).
+Il componente tiene un buffer circolare interno (`log_buffer.py`, servito da
+`/api/vimar_intercom/debug`) che riceve tutte le righe, `DEBUG` compreso. Il logger
+`custom_components.vimar_intercom` ha `propagate = False`: al log di Home Assistant le righe
+arrivano da un handler dedicato, con questa soglia:
 
-Patch applicata: il logger `custom_components.vimar_intercom` resta a `DEBUG` per il buffer interno,
-ma con `propagate = False`; un handler dedicato inoltra al log HA solo gli eventi `WARNING` e oltre.
-Risultato: diagnostica interna intatta, log HA pulito.
+- livello non impostato → solo `WARNING` e oltre (log HA pulito);
+- livello impostato con `logger:` in `configuration.yaml` o con il servizio `logger.set_level`
+  → quel livello, `DEBUG` compreso (dalla 1.0.7; prima restava comunque `WARNING`).
+  Il livello scelto vale anche per il buffer: con `warning` il buffer perde le righe `DEBUG`.
+
+Buffer e log di HA passano entrambi dall'oscuramento delle credenziali (`log_redact.py`).
 
 **"Stale response 407" nel keepalive SIP**: l'OPTIONS periodico (`_send_options_ping` in
 `sip_client.py`) non registra il proprio Call-ID tra le risposte attese, quindi la risposta del
@@ -201,13 +204,6 @@ proxy (tipicamente un `407`) veniva loggata come `WARNING "Stale response ..."` 
 normale del keepalive. `_dispatch_message` ora riconosce i Call-ID con prefisso `ping-` e li logga
 a `DEBUG` invece che `WARNING`. Con questa fix + quella sopra, **non serve più** alcun filtro
 `logger:` in `configuration.yaml` per silenziare questi messaggi.
-
-**Limite noto**: il compromesso vale in entrambe le direzioni. Poiché il componente tiene il proprio
-logger a `DEBUG` e inoltra solo `WARNING` e oltre, impostare
-`logger: logs: custom_components.vimar_intercom: debug` in `configuration.yaml` **non** farà comparire
-le righe `DEBUG` di questo componente nel log di Home Assistant: si leggono da
-`/api/vimar_intercom/debug`. Rendere configurabile il livello inoltrato è nella lista delle cose da
-fare.
 
 Se aggiorni `__init__.py` o `sip_client.py` da una fonte esterna (non HACS, non versionato per
 questo componente), ricontrolla che entrambe le patch siano ancora presenti (vedi nota in

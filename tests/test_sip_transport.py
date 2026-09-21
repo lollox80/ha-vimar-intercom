@@ -82,8 +82,13 @@ def _risposte(monkeypatch, raws):
     async def _wait(cid, timeout=15):
         return list(raws)
 
+    async def _request(_msg, cid, timeout=15):
+        return list(raws)
+
     monkeypatch.setattr(sip, "send", _send)
     monkeypatch.setattr(sip, "_wait_final", _wait)
+    # Dalla 1.0.7 REGISTER e MESSAGE passano da _send_request (ritrasmissione UDP).
+    monkeypatch.setattr(sip, "_send_request", _request)
 
 
 def _prepara(monkeypatch):
