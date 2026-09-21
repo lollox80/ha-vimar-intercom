@@ -11,6 +11,7 @@ from . import media_handler as media
 from . import push_sender
 from . import const as C
 from . import runtime as R
+from . import rest_client
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -74,6 +75,13 @@ class VimarIntercomHub:
         self._call_timeout_task: asyncio.Task | None = None
         self._keyframe_task: asyncio.Task | None = None
         self._auto_called = False
+        # Ricerca del PICG (servizio find_sga): una scansione alla volta, e un
+        # future che _handle_nicks_reply risolve quando arriva GET_NICKS_REPLY.
+        self._scan_lock = asyncio.Lock()
+        self._probe_waiter: asyncio.Future | None = None
+        self._probe_kind: str | None = None   # "GET_NICKS" | "GET_INIT_STATUS"
+        self._nicks_seq = 0   # quante GET_NICKS_REPLY sono arrivate
+        self._init_seq = 0    # quante GET_INIT_STATUS_REPLY sono arrivate
         self._auto_call_target: str | None = None
 
         # ─── Statistiche / stato esteso (esposte da sensor.py) ───────────
@@ -739,9 +747,14 @@ class VimarIntercomHub:
             self._handle_call_info(raw)
             return
 
-        # NEW_PHONEBOOK;<gid>;<ver>  [da confermare sul campo]
+        # NEW_PHONEBOOK;<ver>;<gid>  [ordine verificato nel sorgente dell'app]
         if upper.startswith("NEW_PHONEBOOK"):
             self._handle_new_phonebook(raw)
+            return
+
+        # GET_NICKS_REPLY;[{ROLE,EXT,NAME},…]  [VERIFICATO 20/09]
+        if upper.startswith("GET_NICKS_REPLY"):
+            self._handle_nicks_reply(raw)
             return
 
         _LOGGER.debug("MESSAGE in ingresso non mappato: %r", raw[:120])
@@ -787,6 +800,8 @@ class VimarIntercomHub:
 
         st = self.stats
         st["init_status"] = {**st.get("init_status", {}), **pairs}
+        self._init_seq += 1
+        self._resolve_probe("GET_INIT_STATUS", pairs)
 
         def _as_bool(v):
             return str(v).strip() in ("1", "true", "True", "ON", "on")
@@ -917,6 +932,143 @@ class VimarIntercomHub:
             self._fire_event(
                 C.EVENT_PHONEBOOK_CHANGED, {"gid": gid or R.SIP_USER, "rubrica_ver": None}
             )
+
+    def _handle_nicks_reply(self, raw: str) -> None:
+        """GET_NICKS_REPLY: i nickname dell'impianto, con il ruolo di ciascuno.
+
+        È la risposta che la ricerca del PICG aspetta: la voce con ruolo `PICG`
+        è l'indirizzo che il citofono dichiara come capogruppo. Arriva dal Tab,
+        non necessariamente dall'indirizzo interrogato (sull'impianto di
+        riferimento risponde 55002 a una richiesta mandata a 55001).
+        """
+        nicks = rest_client.parse_nicks_reply(raw)
+        if not nicks:
+            _LOGGER.debug("GET_NICKS_REPLY senza voci leggibili: %r", raw[:120])
+            return
+        picg = rest_client.find_picg(nicks)
+        self.stats["nicknames"] = nicks
+        self.stats["picg_declared"] = picg
+        self._nicks_seq += 1
+        _LOGGER.info("GET_NICKS_REPLY: %d voci, PICG dichiarato=%s", len(nicks), picg)
+        self._resolve_probe("GET_NICKS", nicks)
+
+    def _resolve_probe(self, kind: str, value) -> None:
+        waiter = self._probe_waiter
+        if self._probe_kind == kind and waiter is not None and not waiter.done():
+            waiter.set_result(value)
+
+    @staticmethod
+    def _probe_outcome(ok: bool, msg: str) -> str:
+        """Esito SIP di una sonda, nelle categorie della regola dei tre esiti."""
+        import re
+
+        m = re.search(r"\b([1-6]\d\d)\b", msg or "")
+        code = int(m.group(1)) if m else None
+        if ok:
+            return "exists"            # 2xx: l'indirizzo esiste
+        if code == 404:
+            return "absent"            # l'indirizzo non esiste nell'impianto
+        if msg == "Timeout":
+            return "no_response"
+        return "error"
+
+    async def async_find_picg(
+        self,
+        targets: list[str],
+        *,
+        probe: str = "GET_NICKS",
+        reply_wait: float = 3.0,
+        delay: float = 1.0,
+        sip_timeout: float = 8.0,
+    ) -> dict:
+        """Interroga gli indirizzi uno alla volta finché uno fa rispondere il Tab.
+
+        Due sonde, perché nessuna delle due va bene ovunque:
+
+        * `GET_NICKS` (default): silenziosa sull'app [VERIFICATO 21/09], e la
+          reply *dichiara* il PICG nel contenuto — vale anche se arriva tardi.
+          Ma su un 40515 in cloud un indirizzo esistente l'ha lasciata senza
+          risposta SIP (Timeout, issue #14).
+        * `GET_INIT_STATUS`: su quello stesso impianto dà i tre esiti puliti, ma
+          fa comparire «Configurazione appartamento modificata» a ogni invio
+          all'SGA vero, e la reply **non** dice chi è il PICG: lo si deduce da
+          quale sonda l'ha provocata. Una reply fuori finestra quindi non
+          identifica nessuno: si riportano i due candidati.
+
+        Nessuna scrittura nella configurazione: lo decide il chiamante.
+        """
+        if probe not in ("GET_NICKS", "GET_INIT_STATUS"):
+            return {"ok": False, "error": f"sonda non supportata: {probe}"}
+        if self._scan_lock.locked():
+            return {"ok": False, "error": "Una ricerca è già in corso"}
+        by_content = probe == "GET_NICKS"
+        async with self._scan_lock:
+            loop = asyncio.get_running_loop()
+            probes: list[dict] = []
+            picg: str | None = None
+            nicks: list[dict] = []
+            reply_after: str | None = None
+            candidates: list[str] = []
+            seq0 = self._nicks_seq if by_content else self._init_seq
+            self._probe_kind = probe
+            try:
+                for i, target in enumerate(targets):
+                    if i:
+                        await asyncio.sleep(delay)
+                    self._probe_waiter = loop.create_future()
+                    try:
+                        ok, msg = await sip.do_system_message(
+                            sip_uri(target), probe, extra_headers={"Panda": "blue"},
+                            timeout=sip_timeout)
+                    except Exception as err:  # noqa: BLE001
+                        ok, msg = False, str(err)
+                    if msg == "Non registrato":
+                        return {"ok": False, "error": "Non registrato: ricerca interrotta",
+                                "probe": probe, "probes": probes}
+                    entry = {"target": target, "outcome": self._probe_outcome(ok, msg), "sip": msg}
+                    if ok:
+                        try:
+                            got = await asyncio.wait_for(
+                                asyncio.shield(self._probe_waiter), reply_wait)
+                        except asyncio.TimeoutError:
+                            got = None
+                        if got:
+                            entry["outcome"] = "replied"
+                            reply_after = target
+                            if by_content:
+                                nicks = got
+                                picg = rest_client.find_picg(nicks)
+                            else:
+                                picg = target
+                    seq_now = self._nicks_seq if by_content else self._init_seq
+                    if not picg and seq_now != seq0 and reply_after is None:
+                        # Reply arrivata fuori dalla finestra d'attesa.
+                        entry["late_reply"] = True
+                        if by_content:
+                            late = list(self.stats.get("nicknames") or [])
+                            if rest_client.find_picg(late):
+                                nicks, picg = late, rest_client.find_picg(late)
+                                reply_after = target
+                        else:
+                            # Non dice chi è: l'ha provocata questa sonda o la precedente.
+                            candidates = [p["target"] for p in probes[-1:]] + [target]
+                    seq0 = self._nicks_seq if by_content else self._init_seq
+                    probes.append(entry)
+                    _LOGGER.info("find_sga[%s]: %s → %s (%s)", probe, target, entry["outcome"], msg)
+                    if picg or candidates:
+                        break
+            finally:
+                self._probe_waiter = None
+                self._probe_kind = None
+            return {
+                "ok": True,
+                "probe": probe,
+                "picg": picg,
+                "reply_after": reply_after,
+                "candidates": candidates,
+                "nicknames": [{"role": n["role"], "ext": n["ext"], "name": n["name"]} for n in nicks],
+                "probes": probes,
+            }
 
     async def _request_init_status(self):
         """Chiede lo stato iniziale al PICG (GET_INIT_STATUS, Panda: blue).

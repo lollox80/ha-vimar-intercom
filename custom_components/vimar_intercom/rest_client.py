@@ -34,6 +34,7 @@ modulo tiene a bada:
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import requests
@@ -277,6 +278,31 @@ def parse_nicknames(raw: bytes | str) -> list[dict[str, str]]:
                 "name": str(item.get("NAME", "")).strip(),
             }
         )
+    return out
+
+
+def parse_nicks_reply(body: str) -> list[dict[str, str]]:
+    """Il corpo di un `GET_NICKS_REPLY;[...]` arrivato via SIP.
+
+    Stesso JSON di `action=nickname`, preceduto dal nome del comando. A
+    differenza della via HTTP qui il testo può arrivare troncato (log, sensori
+    che tagliano a 200 caratteri, o un MESSAGE spezzato): se l'array intero non
+    è JSON valido si recuperano uno per uno gli oggetti completi, così la voce
+    `PICG` — che il citofono manda per prima — non va persa. Non solleva mai.
+    """
+    raw = (body or "").strip()
+    head, sep, rest = raw.partition(";")
+    payload = rest if sep and head.strip().upper() == "GET_NICKS_REPLY" else raw
+    try:
+        return parse_nicknames(payload)
+    except RestError:
+        pass
+    out: list[dict[str, str]] = []
+    for chunk in re.findall(r"\{[^{}]*\}", payload):
+        try:
+            out.extend(parse_nicknames("[" + chunk + "]"))
+        except RestError:
+            continue
     return out
 
 

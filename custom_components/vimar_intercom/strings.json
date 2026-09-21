@@ -235,6 +235,48 @@
           "description": "Comando di apertura"
         }
       }
+    },
+    "find_sga": {
+      "name": "Find SGA/PICG",
+      "description": "Sends GET_NICKS (Panda: blue) to the given addresses one at a time and stops when the intercom answers with GET_NICKS_REPLY: the entry with role PICG is the system's group head. Use it when you don't know the SGA and have no phonebook (cloud-only systems, issue #14). On the reference system GET_NICKS raises no notification in the app; on others this is not verified yet. It does not change the configuration unless you choose Apply.",
+      "fields": {
+        "start": {
+          "name": "First address",
+          "description": "Start of the range (inclusive)."
+        },
+        "end": {
+          "name": "Last address",
+          "description": "End of the range (inclusive). At most 50 addresses."
+        },
+        "targets": {
+          "name": "Specific addresses",
+          "description": "Instead of the range, a comma-separated list (e.g. 55001, 55002, 55100). If set, start/end are ignored."
+        },
+        "delay": {
+          "name": "Pause between probes",
+          "description": "Seconds between one probe and the next."
+        },
+        "reply_wait": {
+          "name": "Reply wait",
+          "description": "Seconds to wait for GET_NICKS_REPLY after each accepted probe."
+        },
+        "apply": {
+          "name": "Apply as PICG",
+          "description": "If found, write it to picg_target (the integration reloads)."
+        },
+        "apply_sga": {
+          "name": "Also apply as SGA",
+          "description": "If found, also write the same address to sga_target (target of voicemail, do-not-disturb and door opening). They matched on every system seen so far, but they are two distinct values."
+        },
+        "probe": {
+          "name": "Probe",
+          "description": "get_nicks (default) raises no notification in the app and its reply names the PICG. get_init_status is the fallback for systems where get_nicks times out: it gives the three clean outcomes, but sent to the real SGA it makes the app show \"Configurazione appartamento modificata\" every time."
+        },
+        "sip_timeout": {
+          "name": "SIP timeout per probe",
+          "description": "How long to wait for each probe's SIP answer (200/404) before moving on."
+        }
+      }
     }
   }
 }

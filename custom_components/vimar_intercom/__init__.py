@@ -40,6 +40,7 @@ SERVICE_ANSWER = "answer"
 SERVICE_HANGUP = "hangup"
 SERVICE_OPEN_DOOR = "open_door"
 SERVICE_FETCH_LOCAL = "fetch_local"
+SERVICE_FIND_SGA = "find_sga"
 
 def _default_sga_target() -> str:
     """Default dinamico per i servizi: valore SGA correntemente configurato
@@ -59,6 +60,17 @@ FETCH_LOCAL_SCHEMA = vol.Schema({
     vol.Optional("save_as"): cv.string,                 # nome file in /config (opzionale)
     vol.Optional("host"): cv.string,                    # default: local_proxy
     vol.Optional("scheme", default="http"): cv.string,
+})
+FIND_SGA_SCHEMA = vol.Schema({
+    vol.Optional("start", default="55000"): cv.string,
+    vol.Optional("end", default="55010"): cv.string,
+    vol.Optional("targets"): cv.string,
+    vol.Optional("delay", default=1.0): vol.All(vol.Coerce(float), vol.Range(min=0.2, max=10)),
+    vol.Optional("reply_wait", default=3.0): vol.All(vol.Coerce(float), vol.Range(min=1, max=15)),
+    vol.Optional("probe", default="get_nicks"): vol.In(["get_nicks", "get_init_status"]),
+    vol.Optional("sip_timeout", default=8.0): vol.All(vol.Coerce(float), vol.Range(min=2, max=15)),
+    vol.Optional("apply", default=False): cv.boolean,
+    vol.Optional("apply_sga", default=False): cv.boolean,
 })
 OPEN_DOOR_SCHEMA = vol.Schema({
     vol.Optional("target", default=_default_sga_target): cv.string,
@@ -219,7 +231,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await data["hub"].async_stop()
         if not hass.data[DOMAIN]:
             for svc in (SERVICE_SEND_COMMAND, SERVICE_CALL, SERVICE_ANSWER,
-                        SERVICE_HANGUP, SERVICE_OPEN_DOOR, SERVICE_FETCH_LOCAL):
+                        SERVICE_HANGUP, SERVICE_OPEN_DOOR, SERVICE_FETCH_LOCAL,
+                        SERVICE_FIND_SGA):
                 hass.services.async_remove(DOMAIN, svc)
     return ok
 
@@ -353,6 +366,47 @@ def _register_services(hass: HomeAssistant) -> None:
             target=call.data.get("target"), command=call.data.get("command"))
         return {"ok": ok, "result": msg}
 
+    async def _svc_find_sga(call: ServiceCall):
+        """Cerca il PICG chiedendo GET_NICKS agli indirizzi indicati (issue #14).
+
+        Non scrive nulla nella configurazione, salvo `apply: true` e un PICG
+        trovato; `apply_sga: true` aggiorna anche sga_target (sugli impianti visti
+        finora i due coincidono, ma sono due valori distinti).
+        """
+        try:
+            targets = validate.scan_targets(
+                call.data.get("start"), call.data.get("end"), call.data.get("targets"))
+        except ValueError as err:
+            return {"ok": False, "error": str(err)}
+        hub = _get_hub_from_hass(hass)
+        result = await hub.async_find_picg(
+            targets,
+            probe=call.data["probe"].upper(),
+            reply_wait=call.data["reply_wait"],
+            delay=call.data["delay"],
+            sip_timeout=call.data["sip_timeout"],
+        )
+        result["scanned"] = len(result.get("probes") or [])
+        result["applied"] = {}
+        picg = result.get("picg")
+        if result.get("ok") and picg and (call.data["apply"] or call.data["apply_sga"]):
+            if validate.sip_target(picg) is None:
+                result["error"] = f"PICG dichiarato non valido: {picg!r}"
+                return result
+            entry = next(iter(hass.config_entries.async_entries(DOMAIN)), None)
+            if entry is not None:
+                changes = {}
+                if call.data["apply"]:
+                    changes["picg_target"] = picg
+                if call.data["apply_sga"]:
+                    changes["sga_target"] = picg
+                result["applied"] = changes
+                _LOGGER.warning("find_sga: configurazione aggiornata %s", changes)
+                # L'update listener ricarica l'entry: runtime riparte coi valori nuovi.
+                hass.config_entries.async_update_entry(
+                    entry, options={**entry.options, **changes})
+        return result
+
     hass.services.async_register(
         DOMAIN, SERVICE_SEND_COMMAND, _svc_send_command,
         schema=SEND_COMMAND_SCHEMA, supports_response=SupportsResponse.OPTIONAL)
@@ -371,6 +425,9 @@ def _register_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN, SERVICE_FETCH_LOCAL, _svc_fetch_local,
         schema=FETCH_LOCAL_SCHEMA, supports_response=SupportsResponse.OPTIONAL)
+    hass.services.async_register(
+        DOMAIN, SERVICE_FIND_SGA, _svc_find_sga,
+        schema=FIND_SGA_SCHEMA, supports_response=SupportsResponse.OPTIONAL)
 
 
 class VimarAudioWSView(HomeAssistantView):

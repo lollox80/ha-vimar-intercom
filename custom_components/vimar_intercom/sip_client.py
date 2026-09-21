@@ -910,7 +910,7 @@ async def do_register():
     return False
 
 
-async def do_system_message(target_uri, body_text, extra_headers=None):
+async def do_system_message(target_uri, body_text, extra_headers=None, timeout=15):
     if not registered:
         _LOGGER.warning("do_system_message: not registered, target=%s body=%s", target_uri, body_text)
         return False, "Non registrato"
@@ -942,7 +942,7 @@ async def do_system_message(target_uri, body_text, extra_headers=None):
               f"Content-Length: {_clen(body_text)}\r\n\r\n{body_text}")
         return m
 
-    for r in await _send_request(_msg(seq=_next_cseq()), cid, timeout=15):
+    for r in await _send_request(_msg(seq=_next_cseq()), cid, timeout=timeout):
         code, hdrs, *_ = _parse(r)
         _LOGGER.info("do_system_message: response %s for %s", code, target_uri)
         if code and code < 200:
@@ -952,7 +952,7 @@ async def do_system_message(target_uri, body_text, extra_headers=None):
             if not ch:
                 return False, f"Auth vuoto ({code})"
             auth = _make_auth("MESSAGE", target_uri, ch)
-            for r2 in await _send_request(_msg(auth=auth, seq=_next_cseq()), cid, timeout=15):
+            for r2 in await _send_request(_msg(auth=auth, seq=_next_cseq()), cid, timeout=timeout):
                 c2 = _parse(r2)[0]
                 _LOGGER.info("do_system_message: auth response %s for %s", c2, target_uri)
                 if c2 and 200 <= c2 < 300:
