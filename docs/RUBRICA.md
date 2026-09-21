@@ -1,20 +1,47 @@
 # RUBRICA.md — La rubrica Vimar (`rubrica.db`): schema, estrazione, uso in HA
 
-**Aggiornato:** 17 settembre 2026.
+**Aggiornato:** 21 settembre 2026.
 
 La `rubrica.db` è il database SQLite che l'app VIEW / il Tab usano per sapere **chi chiamare**,
 **quali attuatori mostrare**, **con quale comando/target**, e **chi è l'SGA** (il destinatario dei
 comandi di stato segreteria/DND). È la fonte di verità per rendere l'integrazione "universale":
 gli attuatori HA, l'SGA e i target non sono indovinati, si leggono da qui.
 
-Su questo impianto (**solo‑cloud**) la rubrica NON è ottenibile a runtime da HA (vedi §4). È stata
-estratta una tantum rootando un muletto (§3), poi convertita con `tools/parse_rubrica.py` (§5) nella
-lista JSON da incollare nelle opzioni dell'integrazione.
+> ⚠️ **Fino al 19/09 questo file diceva che sull'impianto di sviluppo la rubrica non era ottenibile a
+> runtime, perché «la porta 80 del Tab non risponde».** Era sbagliato: la porta 80 risponde, con
+> autenticazione Digest. Se il citofono è raggiungibile in rete locale, la rubrica si scarica direttamente
+> da lì con le credenziali SIP (§0) — ed è quello che fa l'integrazione dalla PR #16. L'estrazione dal
+> telefono (§3, §3-bis) resta per chi il citofono non lo raggiunge in LAN.
 
 > **Nessuna credenziale in questo file.** Non riportare mai password SIP, `ha1`, token account,
 > IMEI o PIN del Tab. I comandi `adb`/`su` qui sotto sono generici.
 
-## 0. Via più semplice: scaricarla dal cloud con il `token` [VERIFICATO 17/09/2026]
+## 0. Via più semplice: chiederla al citofono [VERIFICATO 20/09/2026]
+
+Se il citofono è raggiungibile in rete locale basta una GET, autenticata con **le credenziali SIP** che
+l'integrazione ha già — niente token, niente account Vimar, niente cloud, niente telefono rootato:
+
+```bash
+curl -sS --digest -u "<sip_user>:<sip_password>" \
+     "http://<ip-del-citofono>/rest/get_file.php?name=rubrica" -o rubrica.db
+```
+
+Verificato su un Tab 7S (40507): `200`, un SQLite identico a quello estratto dall'app Android.
+**Dall'integrazione: Opzioni → «Scarica la rubrica dal citofono»**, che nella stessa occasione chiede
+`get_info.php?action=nickname` e ne ricava il **PICG dichiarato dall'impianto**.
+
+Quattro trappole del server del citofono, tutte gestite da `rest_client.py`:
+
+- il nome va **senza** `.db`: `name=rubrica` funziona, `name=rubrica.db` risponde 401;
+- risponde **401 anche a una risorsa che non conosce**, mai 404 — un 401 non significa per forza
+  credenziali sbagliate;
+- il `nonce` del Digest arriva come `nonce="b'…'"` (apici compresi) e va rimandato identico;
+- la risposta dichiara `Content-Encoding: none`, un valore non standard: non va decodificata.
+
+Le risposte portano `Last-Modified`: con `If-Modified-Since` si sa se la rubrica è cambiata senza
+riscaricarla. Lo stesso endpoint serve anche la segreteria: `get_file.php?name=mailbox`.
+
+## 0-bis. Dal cloud, con il `token` — solo impianti che lo mandano [VERIFICATO 17/09/2026]
 
 Se il tuo impianto risponde al `GET_INIT_STATUS` in **forma lunga** (con `token` e `rubrica_ver` fra i
 PARAM — vedi `docs/PROTOCOL.md` §4-bis), la rubrica si scarica con una sola richiesta autenticata,
@@ -54,8 +81,9 @@ Lo User-Agent conta: è quello che manda l'app VIEW.
 Il file scaricato è **identico a quello che l'app Android tiene in locale**, quindi si dà in pasto
 direttamente all'importer delle opzioni (o a `tools/parse_rubrica.py`) senza conversioni.
 
-Verificato da @CPietro su un impianto 40515/2FV2 in cloud (issue pubblica #5). **Su questo impianto non
-è applicabile**: la nostra reply è corta e il token non c'è — restano i metodi §3 e §3-bis.
+Verificato da @CPietro su un impianto 40515/2FV2 in cloud (issue pubblica #5). **Sull'impianto di
+sviluppo non è applicabile**: la reply è corta e il token non c'è. Serve soprattutto a chi non raggiunge
+il citofono in LAN: dove il citofono risponde su HTTP, §0 è più semplice e non dipende dal token.
 
 > Il `token` va trattato come la password SIP: mai nei log, mai nel repo, mai in un incolla pubblico.
 > Se lo pubblichi da qualche parte, considera compromessa la rubrica dell'impianto.
@@ -64,15 +92,14 @@ Verificato da @CPietro su un impianto 40515/2FV2 in cloud (issue pubblica #5). *
 
 Tre vie, a seconda del tipo di impianto (`CLOUD` nel QR: 0 home+cloud, 1 prima home poi cloud, 2 solo cloud):
 
-- **Home mode** (`CLOUD=0/1`, LAN): `http://<proxy>/rest/get_file.php?name=rubrica` (HTTP Digest `sipID`/password),
-  preceduto da mDNS discovery `_eipvdes._tcp` (TXT `domain/mac/proxy`). — **Su questo impianto :80 è muto** → via chiusa.
-- **SIP**: `GET_INIT_STATUS` (Panda: blue → PICG) → `GET_INIT_STATUS_REPLY` contiene `token` e `rubrica_ver`,
-  poi download cloud (sotto). — **Su questo impianto la reply non arriva** → via chiusa.
+- **Home mode** (`CLOUD=0/1`, LAN): `http://<proxy>/rest/get_file.php?name=rubrica` (HTTP Digest `sipID`/password SIP)
+  — **funziona sull'impianto di sviluppo** [VERIFICATO 20/09]; la vecchia nota «:80 muto» era sbagliata.
+- **SIP**: `GET_INIT_STATUS` (Panda: blue → PICG) → `GET_INIT_STATUS_REPLY`, che **su alcuni impianti**
+  contiene `token` e `rubrica_ver`, poi download cloud (sotto).
 - **Cloud phonebook**: `GET https://<cproxy>/phonebook/domains/<cdomain_senza_.cproxy>/<ver>` con
   **HTTP Digest user=`<cDomain>` pass=`<token>`** (`VMClientRepository.startCloudDownloadRubrica`).
-  Il `token` nel SDK viene SOLO da `GET_INIT_STATUS_REPLY` o da `get_info.php?action=status` → entrambi
-  assenti qui: in cloud il token è **provisionato dal layer app `com.vimar.view`** (account OIDC
-  `prod.vimar.cloud`), non reversato nel SDK. → via aperta ma bloccata sul token (vedi ROADMAP 3.1.0).
+  Il `token` viene **solo** dal `GET_INIT_STATUS_REPLY` (o dal suo equivalente HTTP). L'ipotesi che lo
+  fornisse l'account Vimar è **smentita**: l'account non ha accesso al citofono.
 
 ## 2. Schema (23 tabelle) — dati reali di questo impianto + note universali
 
@@ -128,18 +155,19 @@ Metodo riportato da @CPietro su un impianto 40515/2FV2 nel thread della
 non verificato direttamente su questo impianto. Vale la stessa regola del punto 4: `linphonerc` e le
 preferenze non escono da lì.
 
-## 4. Perché su questo impianto le altre vie sono chiuse
+## 4. Stato delle vie sull'impianto di sviluppo [aggiornato 20/09/2026]
 
-> ⚠ **Vale per questo impianto, non per tutti.** Su un 40515/2FV2 in cloud, @CPietro riceve
-> regolarmente le `GET_INIT_STATUS_REPLY`
-> (`[{"PARAM":"dnd","VALUE":"0"},{"PARAM":"voicemail","VALUE":"…"}]`) e i comandi di stato SIP
-> vengono accettati dal Tab. La porta 80 invece risulta chiusa anche lì. Vedi la sezione
-> *Compatibilità* del README.
+Fino al 19/09 questa sezione elencava quattro vie «chiuse». Com'è davvero:
 
-- **Home HTTP** (:80 del Tab): accetta il TCP ma non risponde (read timeout) — l'impianto è solo‑cloud, la home mode è disattivata.
-- **SIP `GET_INIT_STATUS`**: nessuna `GET_INIT_STATUS_REPLY` (manca un PICG che la generi lato SIP; il Tab fa solo 200‑ACK).
-- **`adb backup`**: bloccato da `allowBackup=false`.
-- **Cloud phonebook**: endpoint noto, ma il `token` è provisionato dal layer app/account, non ricavabile dal SDK.
+| Via | Stato |
+|---|---|
+| **HTTP locale** (porta 80 del Tab) | ✅ funziona, con Digest e credenziali SIP (§0) |
+| SIP `GET_INIT_STATUS` | ✅ funziona **verso il PICG** (qui 55001); prima lo mandavamo all'indirizzo sbagliato |
+| `adb backup` | ❌ `allowBackup=false` — non serve più |
+| Cloud col `token` | ⛔ non applicabile qui: la reply è corta, niente token |
+
+> Su un 40515/2FV2 in cloud (@CPietro) la porta 80 era stata segnalata chiusa. Quella prova è di prima che
+> sapessimo del Digest: vale la pena ripeterla con le credenziali SIP, come in §0.
 
 ## 5. Da `rubrica.db` a opzioni HA — `tools/parse_rubrica.py`
 
@@ -157,8 +185,10 @@ crea i bottoni dinamici (`button.py` → `VimarActuatorButton`), inviati con `hu
 
 ## 6. Rendere l'importazione "universale" (ROADMAP)
 
-- ~~Servizio/importer `rubrica.db` → `options["actuators"]` senza copia‑incolla manuale.~~ **Fatto 07/09/2026**: menu opzioni → "Importa attuatori da rubrica.db" (vedi `config_flow.py`, modulo `rubrica_import.py`). Estrae e mostra anche l'SGA rilevato, ma non lo applica: resta da fare il punto successivo.
-- Auto‑detect `sga_target` da `SYSTEM.MAGIC_APT_INTERCOM` (oggi default 55001 in `const.py`).
-- Mappatura `ICON_LIST` → device_class HA; supporto `TIME`/`DTMF`.
+- ~~Importer `rubrica.db` → `options["actuators"]` senza copia‑incolla manuale.~~ **Fatto** (file caricato).
+- ~~Auto‑detect `sga_target` da `SYSTEM.MAGIC_APT_INTERCOM`.~~ **Fatto** (applicato alla conferma).
+- ~~Scaricare la rubrica senza estrarla a mano.~~ **Fatto**: «Scarica la rubrica dal citofono», con il PICG
+  dichiarato dall'impianto.
+- Mappatura `ICON_LIST` → device_class HA; supporto `TIME`. (La colonna `DTMF` c'è, ma l'app non la usa mai.)
 - Entità derivate dal `PHONEBOOK` (targhe/camere 551xx, centralino, appartamento) + supporto `TVCC_LIST` dove presente.
 - Import cloud phonebook quando il `token` è disponibile (impianti con SIP reply o home HTTP).
