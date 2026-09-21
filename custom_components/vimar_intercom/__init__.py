@@ -67,6 +67,8 @@ FIND_SGA_SCHEMA = vol.Schema({
     vol.Optional("targets"): cv.string,
     vol.Optional("delay", default=1.0): vol.All(vol.Coerce(float), vol.Range(min=0.2, max=10)),
     vol.Optional("reply_wait", default=3.0): vol.All(vol.Coerce(float), vol.Range(min=1, max=15)),
+    vol.Optional("probe", default="get_nicks"): vol.In(["get_nicks", "get_init_status"]),
+    vol.Optional("sip_timeout", default=8.0): vol.All(vol.Coerce(float), vol.Range(min=2, max=15)),
     vol.Optional("apply", default=False): cv.boolean,
     vol.Optional("apply_sga", default=False): cv.boolean,
 })
@@ -378,7 +380,12 @@ def _register_services(hass: HomeAssistant) -> None:
             return {"ok": False, "error": str(err)}
         hub = _get_hub_from_hass(hass)
         result = await hub.async_find_picg(
-            targets, reply_wait=call.data["reply_wait"], delay=call.data["delay"])
+            targets,
+            probe=call.data["probe"].upper(),
+            reply_wait=call.data["reply_wait"],
+            delay=call.data["delay"],
+            sip_timeout=call.data["sip_timeout"],
+        )
         result["scanned"] = len(result.get("probes") or [])
         result["applied"] = {}
         picg = result.get("picg")

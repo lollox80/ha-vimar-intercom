@@ -267,6 +267,14 @@
         "apply_sga": {
           "name": "Applica anche come SGA",
           "description": "Se trovato, scrive lo stesso indirizzo anche in sga_target (destinatario di segreteria, non disturbare e apri-porta). Sugli impianti visti finora coincidono; sono comunque due valori distinti."
+        },
+        "probe": {
+          "name": "Sonda",
+          "description": "get_nicks (default) è silenziosa sull'app e la risposta dichiara il PICG. get_init_status è l'alternativa per gli impianti dove get_nicks va in timeout: dà i tre esiti puliti, ma all'SGA vero fa comparire «Configurazione appartamento modificata» sull'app a ogni invio."
+        },
+        "sip_timeout": {
+          "name": "Timeout SIP per sonda",
+          "description": "Quanto aspettare la risposta SIP (200/404) di ogni sonda prima di passare oltre."
         }
       }
     }

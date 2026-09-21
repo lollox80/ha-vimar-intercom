@@ -20,6 +20,13 @@ Italian and are kept as they were written.
 - It probes with `GET_NICKS` rather than `GET_INIT_STATUS` because on the reference system the
   latter makes the VIEW app show "Configurazione appartamento modificata" on every send, while
   `GET_NICKS` raised no notification in two tests.
+- **Two probes, because neither works everywhere.** On a 40515 in cloud mode (#14) an existing
+  address answered `GET_INIT_STATUS` with `200` but left `GET_NICKS` without any SIP answer
+  (`Timeout`). `probe: get_init_status` is the fallback: clean three outcomes, and the PICG is the
+  address whose probe triggered the reply — at the cost of the app notification on the real SGA. A
+  late `GET_INIT_STATUS_REPLY` names nobody, so the action then reports the two candidate addresses
+  instead of guessing. `sip_timeout` (default 8 s, was a fixed 15 s) bounds each probe;
+  `do_system_message` gained the matching `timeout` argument.
 - `GET_NICKS_REPLY` is now parsed wherever it arrives: the declared nicknames and PICG are kept in
   the hub's stats. The parser recovers the complete entries of a truncated reply.
 - README: the three ways to get SGA/PICG, including the phonebook download added in 1.0.7.

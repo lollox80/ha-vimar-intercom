@@ -267,6 +267,14 @@
         "apply_sga": {
           "name": "Also apply as SGA",
           "description": "If found, also write the same address to sga_target (target of voicemail, do-not-disturb and door opening). They matched on every system seen so far, but they are two distinct values."
+        },
+        "probe": {
+          "name": "Probe",
+          "description": "get_nicks (default) raises no notification in the app and its reply names the PICG. get_init_status is the fallback for systems where get_nicks times out: it gives the three clean outcomes, but sent to the real SGA it makes the app show \"Configurazione appartamento modificata\" every time."
+        },
+        "sip_timeout": {
+          "name": "SIP timeout per probe",
+          "description": "How long to wait for each probe's SIP answer (200/404) before moving on."
         }
       }
     }

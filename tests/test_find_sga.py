@@ -17,6 +17,9 @@ from custom_components.vimar_intercom import sip_client as sip  # noqa: E402
 REPLY = ('GET_NICKS_REPLY;[{"ROLE": "PICG", "EXT": "55001", "NAME": "Casa"}, '
          '{"ROLE": "PIM", "EXT": "60993", "NAME": "Tel A"}, {"ROLE": "PIM", "EXT": "60992", "NAME": "Tel B"}]')
 
+INIT_REPLY = ('GET_INIT_STATUS_REPLY;[{"VALUE": "0123456789abcdef0123456789abcdef", "PARAM": "rubrica_ver"},'
+              '{"VALUE": "0", "PARAM": "dnd"}]')
+
 
 # ─── parser ──────────────────────────────────────────────────────────────────
 
@@ -88,14 +91,16 @@ def _impianto(monkeypatch, hub, risposte: dict[str, str], replica_da: str | None
     Se il target è `replica_da`, dopo `ritardo` s arriva la GET_NICKS_REPLY."""
     inviati: list[tuple[str, str, dict]] = []
 
-    async def _dsm(uri, body, extra_headers=None):
+    async def _dsm(uri, body, extra_headers=None, timeout=15):
         target = uri.split(":", 1)[1].split("@", 1)[0]
         inviati.append((target, body, extra_headers))
         esito = risposte.get(target, "Errore: 404")
         if target == replica_da:
+            testo = REPLY if body == "GET_NICKS" else INIT_REPLY
+
             async def _reply():
                 await asyncio.sleep(ritardo)
-                hub._update_stats("message", REPLY)
+                hub._update_stats("message", testo)
             asyncio.get_running_loop().create_task(_reply())
         return (esito.startswith("OK"), esito)
 
@@ -158,3 +163,58 @@ def test_reply_fuori_scansione_aggiorna_le_statistiche(hub):
     hub._update_stats("message", REPLY)
     assert hub.stats["picg_declared"] == "55001"
     assert len(hub.stats["nicknames"]) == 3
+
+
+# ─── sonda GET_INIT_STATUS (impianti dove GET_NICKS va in timeout) ───────────
+
+def test_init_status_identifica_la_sonda_che_ha_risposto(monkeypatch, hub):
+    """Sul 40515 in cloud di #14: GET_NICKS → Timeout, GET_INIT_STATUS → 200.
+    Qui il PICG è l'indirizzo interrogato, non il contenuto della reply."""
+    inviati = _impianto(monkeypatch, hub, {"55001": "OK (200)", "55003": "OK (200)"}, replica_da="55003")
+    r = asyncio.run(hub.async_find_picg(
+        ["55001", "55002", "55003", "55004"], probe="GET_INIT_STATUS", reply_wait=1, delay=0.01))
+    assert r["picg"] == "55003" and r["probe"] == "GET_INIT_STATUS"
+    assert [p["outcome"] for p in r["probes"]] == ["exists", "absent", "replied"]
+    assert all(body == "GET_INIT_STATUS" for _, body, _h in inviati)
+    assert r["nicknames"] == []
+
+
+def test_init_status_tardiva_non_attribuisce_ma_da_i_candidati(monkeypatch, hub):
+    _impianto(monkeypatch, hub, {"55001": "OK (200)", "55002": "OK (200)"}, replica_da="55001", ritardo=1.3)
+    r = asyncio.run(hub.async_find_picg(
+        ["55001", "55002", "55003"], probe="GET_INIT_STATUS", reply_wait=1, delay=0.5))
+    assert r["picg"] is None
+    assert r["candidates"] == ["55001", "55002"]
+
+
+def test_il_timeout_sip_arriva_al_client(monkeypatch, hub):
+    visti = []
+
+    async def _dsm(uri, body, extra_headers=None, timeout=15):
+        visti.append(timeout)
+        return False, "Timeout"
+
+    monkeypatch.setattr(sip, "do_system_message", _dsm)
+    r = asyncio.run(hub.async_find_picg(["55001"], sip_timeout=4, reply_wait=1, delay=0.01))
+    assert visti == [4] and r["probes"][0]["outcome"] == "no_response"
+
+
+def test_sonda_sconosciuta_rifiutata(hub):
+    r = asyncio.run(hub.async_find_picg(["55001"], probe="OPEN_2F"))
+    assert r["ok"] is False
+
+
+def test_reply_senza_picg_non_marca_tardive_le_sonde_successive(monkeypatch, hub):
+    """Una GET_NICKS_REPLY senza ruolo PICG non deve far segnare «in ritardo» tutto il resto."""
+    senza_picg = 'GET_NICKS_REPLY;[{"ROLE": "PIM", "EXT": "60993", "NAME": "x"}]'
+
+    async def _dsm(uri, body, extra_headers=None, timeout=15):
+        target = uri.split(":", 1)[1].split("@", 1)[0]
+        if target == "55001":
+            hub._update_stats("message", senza_picg)
+        return True, "OK (200)"
+
+    monkeypatch.setattr(sip, "do_system_message", _dsm)
+    r = asyncio.run(hub.async_find_picg(["55001", "55002", "55003"], reply_wait=0.2, delay=0.01))
+    assert r["picg"] is None
+    assert not any(p.get("late_reply") for p in r["probes"][1:])

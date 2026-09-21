@@ -152,6 +152,29 @@ find_sga:
           max: 15
           step: 0.5
           unit_of_measurement: s
+    probe:
+      name: Sonda
+      description: >-
+        get_nicks (default) e' silenziosa sull'app e la risposta dichiara il PICG.
+        get_init_status e' l'alternativa per gli impianti dove get_nicks va in
+        timeout: da' i tre esiti puliti, ma all'SGA vero fa comparire
+        "Configurazione appartamento modificata" sull'app a ogni invio.
+      default: get_nicks
+      selector:
+        select:
+          options:
+            - get_nicks
+            - get_init_status
+    sip_timeout:
+      name: Timeout SIP per sonda (s)
+      description: Quanto aspettare la risposta SIP (200/404) di ogni sonda prima di passare oltre.
+      default: 8
+      selector:
+        number:
+          min: 2
+          max: 15
+          step: 1
+          unit_of_measurement: s
     apply:
       name: Applica come PICG
       description: Se trovato, scrive il PICG in picg_target (l'integrazione si ricarica).

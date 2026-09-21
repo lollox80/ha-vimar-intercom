@@ -159,7 +159,7 @@ tweak the imported actuator list.
 | `vimar_intercom.hangup` | Ends the active call | — |
 | `vimar_intercom.open_door` | Door open command (`OPEN_2F`) | `target`, `command` |
 | `vimar_intercom.fetch_local` | HTTP Digest GET against the Tab's local interface (home mode) | `path`, `save_as`, `host`, `scheme` |
-| `vimar_intercom.find_sga` | Finds the PICG by sending `GET_NICKS` to a range of addresses (issue #14) | `start`, `end`, `targets`, `delay`, `reply_wait`, `apply`, `apply_sga` |
+| `vimar_intercom.find_sga` | Finds the PICG by sending `GET_NICKS` to a range of addresses (issue #14) | `start`, `end`, `targets`, `probe`, `delay`, `reply_wait`, `sip_timeout`, `apply`, `apply_sga` |
 
 Example (Developer tools → Actions):
 
@@ -184,6 +184,12 @@ data:
   end: "55010"
 response_variable: result
 ```
+
+If a plant leaves `GET_NICKS` without any SIP answer (reported on a 40515 in cloud mode: `Timeout` where
+`GET_INIT_STATUS` got `200`), use `probe: get_init_status`. It gives the three clean outcomes, and the
+address whose probe triggers the `GET_INIT_STATUS_REPLY` is the PICG — but sent to the real SGA it makes
+the VIEW app show "Configurazione appartamento modificata" every time. `sip_timeout` (default 8 s)
+bounds how long each probe waits for its SIP answer.
 
 The response lists every probe with its outcome — `absent` (404: no such address), `exists`
 (accepted, but no reply), `replied`, `no_response`, `error` — plus `picg` and the nicknames the
