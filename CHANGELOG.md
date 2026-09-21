@@ -6,6 +6,12 @@ Italian and are kept as they were written.
 
 ## [Unreleased]
 
+## [1.0.7] - 2026-09-21
+
+Stability release from a full debug pass against the decompiled VIEW app, the SIP logs of
+the reference plant and the MITM capture. Every fix below has a regression test.
+It also ships the local phonebook download from #16.
+
 ### Added
 
 - **The phonebook can now be downloaded from the intercom itself.** Options → *Download the
@@ -17,10 +23,11 @@ Italian and are kept as they were written.
   that are reachable only through the cloud.
 - **The intercom now tells us its own PICG.** The same step asks
   `get_info.php?action=nickname`, whose reply carries the `PICG` role and its extension, and
-  offers it as `picg_target` in the confirmation screen. This is the answer to
-  [#10](https://github.com/lollox80/ha-vimar-intercom/issues/10) and makes the scan proposed in
-  [#14](https://github.com/lollox80/ha-vimar-intercom/issues/14) a fallback rather than the plan:
-  the address does not have to be guessed any more. `sga_target` still comes from the phonebook's
+  offers it as `picg_target` in the confirmation screen. On systems where the intercom is
+  reachable on the local network this answers
+  [#10](https://github.com/lollox80/ha-vimar-intercom/issues/10): the address does not have to be
+  guessed. Cloud-only systems still need the scan proposed in
+  [#14](https://github.com/lollox80/ha-vimar-intercom/issues/14). `sga_target` still comes from the phonebook's
   `SYSTEM.MAGIC_APT_INTERCOM` — two distinct values from two distinct sources, as `runtime.py`
   always documented.
 - New pure module `rest_client.py` (`requests`, already a requirement; no Home Assistant imports)
@@ -34,6 +41,62 @@ before touching it: its Digest `nonce` arrives as the `repr()` of a Python `byte
 `Content-Encoding: none`, so the body is read with `decode_content=False`; and **an unknown
 resource is answered with 401, never 404** — a failed download and wrong credentials are
 indistinguishable, which is why `RestAuthError` says both.
+
+### SIP transport
+
+- **Requests over UDP were sent once and never retransmitted.** A single lost datagram
+  turned into "REGISTER: no useful final response (0 responses)" and two minutes of
+  "Not registered" — the pattern that showed up in the reference plant's log every one to
+  three hours. `REGISTER` and `MESSAGE` now retransmit per RFC 3261 (Timer E: 0.5 s,
+  doubling up to 4 s) until any response arrives, and stop on a provisional one. TLS is
+  unchanged. The response queue is also created *before* sending, so an immediate answer
+  is no longer discarded as stale.
+- **The keyframe request could block Home Assistant's event loop for ~3 s.** When an
+  unrelated response sat in the dialog's queue, the wait loop re-queued it and picked it
+  up again without ever yielding (Python 3.12+). Unrelated responses are now set aside
+  and put back after the loop.
+- **`Content-Length` counted characters, not bytes.** Any body with an accented letter
+  (a nickname, a room name) was sent with a wrong length. It is now the UTF-8 byte count.
+- The `REGISTER` failure warning now lists the response codes, the target and the
+  transport, so a log line says what actually happened.
+
+### Incoming messages
+
+- **`NEW_PHONEBOOK;<version>;<gid>` was read with the two fields swapped.** The
+  "Phonebook version" sensor showed the GID, and the next `GET_INIT_STATUS_REPLY`
+  "changed" it back, firing a second, spurious `phonebook_changed`. Order confirmed in the
+  app's receiver.
+- **`CALL_INFO` turned every `0` into `None`.** `MEDIA_TYPE 0` means audio, `REASON 0`
+  means declined, `VIDEO_SRC 0` means the source can't be switched: all three were lost.
+
+### Voicemail and Do Not Disturb switches
+
+- **A failed command flipped the switch anyway** (timeout, 404, "Not registered"), and
+  with no announcement from the intercom to correct it, the wrong state survived a
+  restart. Only a successful send now moves the state, and only while the real state is
+  unknown.
+- While the intercom has never announced its state, the switches report
+  `assumed_state`, so Home Assistant shows on/off buttons instead of presenting a guess
+  as fact (#9).
+
+### Logging
+
+- **`logger.set_level` and `logger:` had no effect on Home Assistant's log.** The
+  component's logger was pinned to `DEBUG` and forwarded only `WARNING` and above. The
+  forwarding threshold now follows the level you set; with nothing set it is still
+  `WARNING`. The internal buffer at `/api/vimar_intercom/debug` still gets everything.
+- **Lines forwarded to Home Assistant's log were not redacted** — only the internal buffer
+  was. Both now go through the same filter.
+- **The redaction filter missed the forms the token actually takes:** `VALUE` before
+  `PARAM` (as the 40507 sends it), JSON objects (`"token": "…"`), dict reprs, and an
+  `Authorization` header inside a message logged with `%r`.
+- Logging setup moved to a pure module, `log_buffer.py`, so it is tested without Home
+  Assistant.
+
+### Services
+
+- **`send_command` with an empty `header_value` sent `Panda: None`.** The header is now
+  added only when both name and value are present, and a CR/LF in either is rejected.
 
 ## [1.0.6] - 2026-09-19
 

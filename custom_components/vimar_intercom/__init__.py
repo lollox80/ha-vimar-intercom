@@ -17,7 +17,7 @@ from homeassistant.exceptions import Unauthorized
 from homeassistant.helpers import device_registry as dr
 
 from .const import DOMAIN
-from .log_redact import redact
+from . import log_buffer as _log_buffer
 from . import validate
 from .hub import VimarIntercomHub
 from . import media_handler as media
@@ -27,47 +27,9 @@ from . import runtime
 
 _LOGGER = logging.getLogger(__name__)
 
-# Ring buffer for debug logs
-_debug_log: list[str] = []
-_MAX_DEBUG_LOG = 200
-
-
-class _DebugHandler(logging.Handler):
-    """Captures vimar_intercom logs into a ring buffer.
-
-    Il buffer viene servito via HTTP da VimarDebugView, quindi ogni riga
-    passa da `redact()`: le credenziali non dovrebbero mai arrivare fin qui,
-    ma se una riga di diagnostica ne porta una, non deve diventare
-    leggibile da un endpoint.
-    """
-    def emit(self, record):
-        try:
-            msg = redact(self.format(record))
-            _debug_log.append(msg)
-            if len(_debug_log) > _MAX_DEBUG_LOG:
-                del _debug_log[:len(_debug_log) - _MAX_DEBUG_LOG]
-        except Exception:
-            pass
-
-
-# Attach debug handler to all vimar loggers
-_dh = _DebugHandler()
-_dh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
-_vlog = logging.getLogger("custom_components.vimar_intercom")
-_vlog.addHandler(_dh)
-_vlog.setLevel(logging.DEBUG)  # serve al buffer interno di debug (_debug_log)
-_vlog.propagate = False  # non propagare i DEBUG al logger root/HA (vedi CHANGELOG/patch logging)
-
-
-class _ForwardToRootHandler(logging.Handler):
-    """Inoltra al log di Home Assistant solo WARNING+ (i DEBUG restano nel buffer interno)."""
-
-    def emit(self, record):
-        logging.getLogger().handle(record)
-
-
-_fwd = _ForwardToRootHandler(level=logging.WARNING)
-_vlog.addHandler(_fwd)
+# Buffer interno dei log e inoltro al log di HA: vedi log_buffer.py.
+_debug_log = _log_buffer.debug_log
+_log_buffer.install()
 
 PLATFORMS = ["camera", "lock", "button", "event", "binary_sensor", "sensor", "switch"]
 

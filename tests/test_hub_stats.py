@@ -111,7 +111,8 @@ def test_new_phonebook_event(hub):
     from custom_components.vimar_intercom import const as C
     events = []
     hub.register_event_callback(lambda et, data: events.append((et, data)))
-    hub._update_stats("message", "NEW_PHONEBOOK;101;v9")
+    # NEW_PHONEBOOK;<ver>;<gid> (ordine corretto nella 1.0.7, vedi test_v107_regressioni)
+    hub._update_stats("message", "NEW_PHONEBOOK;v9;101")
     assert events[-1][0] == C.EVENT_PHONEBOOK_CHANGED
     assert events[-1][1] == {"gid": "101", "rubrica_ver": "v9"}
     assert hub.stats["rubrica_ver"] == "v9"
