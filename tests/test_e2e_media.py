@@ -10,9 +10,9 @@ import asyncio
 import time
 
 import pytest
-from harness.media import audio_info, decodable_frames, frame_sizes, luma_means
+from harness.media import PanelMedia, audio_info, decodable_frames, frame_sizes, luma_means
 from harness.peer import is_
-from harness.rig import Rig, run, wait_until
+from harness.rig import Rig, our_media_addrs, run, wait_until
 from harness.web import AvClient
 
 from custom_components.vimar_intercom import av_passive, av_stream, frame_grabber
@@ -45,6 +45,38 @@ def test_cloud_srtp_rollover_e_foto_decodificabili(monkeypatch):
     run(s())
 
 
+STRAY_BURST = 5  # strays on the 40515 came alone or 3 at a time; 5 used to pass as a jump
+
+
+def test_av_survives_a_burst_of_packets_600_ahead_mid_call(monkeypatch):
+    """STRAY_BURST packets 600 ahead on the same SSRC, ~2 s into a call with /av
+    open. ffmpeg's RTP demuxer accepts a jump under 3000, emits them after
+    max_delay as the new head and drops every live packet as "too late" until
+    the numbers pass them: ~20 s of frozen camera stream, Frigate and Scrypted
+    included."""
+    async def s():
+        async with Rig(monkeypatch, real_av=True, http=True) as rig:
+            await rig.register()
+
+            def start_media(our_sdp, seq0=None):
+                if rig.panel_media:
+                    rig.panel_media.stop()
+                rig.panel_media = PanelMedia(rig.peer.key, 1000, rig.peer.pt, stray_ahead=600,
+                                             stray_at=40, stray_count=STRAY_BURST)
+                rig.panel_media.start(*our_media_addrs(our_sdp))
+            rig.start_media = start_media
+            rig.answer(media_on=True)
+            assert (await rig.hub.async_call())[0]
+            av = AvClient(rig.base, reconnect=False).start()
+            await wait_until(lambda: av.bytes > 20000, 10, "video su /av")
+            await asyncio.sleep(7)
+            await rig.hub.async_hangup()
+            await asyncio.wait_for(av.task, 5)
+            n = decodable_frames(av.segments[0])
+            assert n >= 75, f"/av: {n} decodable frames in ~8 s after the burst (expected ~110)"
+    run(s())
+
+
 def test_cloud_srtp_ring_preview_survives_a_packet_far_ahead(monkeypatch):
     """Real ring on a cloud TLS+SRTP 40515 (2 Oct): the preview stopped after the
     first packets, so no ring photo, a black card and no voice. One authentic
@@ -57,7 +89,7 @@ def test_cloud_srtp_ring_preview_survives_a_packet_far_ahead(monkeypatch):
             await rig.register()
             rig.ring()
             r183 = await rig.peer.wait_for(is_(code=183))
-            rig.panel_media = PanelMedia(rig.peer.key, 1000, rig.peer.pt, stray=20000)
+            rig.panel_media = PanelMedia(rig.peer.key, 1000, rig.peer.pt, stray_ahead=20000)
             rig.start_media(r183.body)
             jpeg = await frame_grabber.wait_frame(8)
             assert jpeg and jpeg[:2] == b"\xff\xd8", "no ring photo: the preview stopped"

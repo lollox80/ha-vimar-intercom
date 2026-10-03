@@ -57,18 +57,27 @@ class AvRtp:
     def __init__(self, ts_step: int):
         self.ts_step = ts_step
         self.ssrc = self.out_ssrc = self.last = None
+        self.head = None  # highest seq sent: `last` can be a late packet
         self.seq_off = self.ts_off = 0
+
+    def follow(self, seq: int) -> None:
+        """Number seq as the one after the newest packet sent. Alone (a jump on
+        the same SSRC) it leaves the clock alone: ffmpeg syncs audio on it."""
+        if self.head is not None:
+            self.seq_off = (self.head + 1 - seq) & 0xFFFF
 
     def fix(self, rtp: bytes, pt: int) -> bytes:
         seq, ts, ssrc = struct.unpack_from('!HII', rtp, 2)
         if self.last is not None and ssrc != self.ssrc:
-            self.seq_off = (self.last[0] + 1 - seq) & 0xFFFF
+            self.follow(seq)
             self.ts_off = (self.last[1] + self.ts_step - ts) & 0xFFFFFFFF
         if self.out_ssrc is None:
             self.out_ssrc = ssrc
         self.ssrc = ssrc
         seq, ts = (seq + self.seq_off) & 0xFFFF, (ts + self.ts_off) & 0xFFFFFFFF
         self.last = (seq, ts)
+        if self.head is None or 0 < (seq - self.head) & 0xFFFF < 0x8000:
+            self.head = seq
         return (rtp[:1] + bytes([(rtp[1] & 0x80) | pt])
                 + struct.pack('!HII', seq, ts, self.out_ssrc) + rtp[12:])
 

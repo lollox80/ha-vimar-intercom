@@ -223,6 +223,249 @@ def test_a_real_gap_is_declared_lost_after_the_reorder_wait(monkeypatch):
     assert p._drop_until_idr
 
 
+def _consumers(p):
+    """What /av's ffmpeg and the HomeKit sinks receive, by sequence number."""
+    fwd, sunk = [], []
+    p.forward_av = True
+    p._forward_av = lambda rtp: fwd.append(_seq_of(rtp))
+    p.rtp_sinks.append(lambda rtp: sunk.append(_seq_of(rtp)))
+    return fwd, sunk
+
+
+@pytest.mark.parametrize("ahead", [600, 20000])
+def test_a_lone_packet_far_ahead_reaches_no_consumer(ahead):
+    """The 40515 cloud relay sends isolated packets far ahead on the same SSRC.
+    /av's ffmpeg took one as the new head and dropped the live stream as too
+    late (600 ahead: ~20 s frozen), and the phone's libsrtp (HomeKit) refused
+    everything behind it. The GOP replayed to a later /av carried it too."""
+    p, _, calls = _video_rx()
+    fwd, sunk = _consumers(p)
+    for seq in range(1000, 1010):
+        p.datagram_received(_pkt(seq, nal=0x65), p.remote_addr)
+    p.datagram_received(_pkt(1009 + ahead), p.remote_addr)
+    for seq in range(1010, 1020):
+        p.datagram_received(_pkt(seq, nal=0x65), p.remote_addr)
+    live = list(range(1000, 1020))
+    assert fwd == sunk == calls == live
+    assert [_seq_of(r) for r in p.gop_in_sequence_order()] == live
+    assert not p._drop_until_idr
+
+
+def test_a_real_jump_on_the_same_ssrc_is_followed_after_a_few_packets():
+    """A relay switching legs (or a long loss) jumps the numbers for good: after
+    RESYNC_FAR packets in a row the stream follows them from the first one, so
+    the first fragments of the keyframe after the jump are not lost."""
+    p, _, calls = _video_rx()
+    fwd, sunk = _consumers(p)
+    for seq in range(1000, 1010):
+        p.datagram_received(_pkt(seq), p.remote_addr)
+    jump = list(range(5000, 5010 + p.RESYNC_FAR))
+    for seq in jump:
+        p.datagram_received(_pkt(seq), p.remote_addr)
+    assert fwd == sunk == calls == list(range(1000, 1010)) + jump
+    assert p._drop_until_idr  # the packets in between are lost: wait for a keyframe
+
+
+def test_a_real_jump_reordered_by_the_relay_is_followed_in_order():
+    """The relay keeps swapping neighbours after the jump, across the wrap: the
+    run is not numbered one after the other but it is one stream."""
+    p, _, calls = _video_rx()
+    fwd, sunk = _consumers(p)
+    for seq in range(64800, 64810):
+        p.datagram_received(_pkt(seq), p.remote_addr)
+    after = [(65530 + i) & 0xFFFF for i in range(p.RESYNC_FAR + 10)]
+    for i in range(0, len(after), 2):
+        p.datagram_received(_pkt(after[i + 1]), p.remote_addr)
+        p.datagram_received(_pkt(after[i]), p.remote_addr)
+    assert calls == list(range(64800, 64810)) + after
+    assert sorted(fwd[10:]) == sorted(sunk[10:]) == sorted(after)
+
+
+def test_a_jump_whose_first_packet_is_its_newest_is_replayed_whole():
+    """The run is replayed from its lowest packet: one FAR_AHEAD past it is
+    still not far ahead of the newest before it, so nothing is held again."""
+    p, _, calls = _video_rx()
+    for seq in range(1000, 1010):
+        p.datagram_received(_pkt(seq), p.remote_addr)
+    run = list(range(5000, 5001 + p.FAR_AHEAD))
+    p.datagram_received(_pkt(run[-1]), p.remote_addr)
+    for seq in run[:-1]:
+        p.datagram_received(_pkt(seq), p.remote_addr)
+    assert calls == list(range(1000, 1010)) + run
+
+
+def test_scattered_strays_in_a_row_do_not_move_the_stream():
+    """Strays far from each other are not one stream that jumped, even
+    RESYNC_FAR of them in a row."""
+    p, _, calls = _video_rx()
+    fwd, sunk = _consumers(p)
+    for seq in range(1000, 1010):
+        p.datagram_received(_pkt(seq), p.remote_addr)
+    for k in range(p.RESYNC_FAR + 1):
+        p.datagram_received(_pkt(2000 + 1000 * k), p.remote_addr)
+    for seq in range(1010, 1020):
+        p.datagram_received(_pkt(seq), p.remote_addr)
+    assert fwd == sunk == calls == list(range(1000, 1020))
+    assert not p._drop_until_idr
+
+
+@pytest.mark.parametrize("ahead", [1000, 0x7F00])
+@pytest.mark.parametrize("n", [5, mh.RTPVideoProtocol.RESYNC_FAR])  # 5 used to pass for a jump
+def test_a_burst_of_strays_does_not_freeze_the_video(n, ahead):
+    """Strays come a few at a time (3 seen): five in a row are held back like one.
+    RESYNC_FAR look like a jump and we follow them, but the live stream keeps
+    coming from where it was: RESYNC_BACK of it in a row and we go back, instead
+    of dropping it all as late (video frozen for seconds, or the whole call)."""
+    p, _, calls = _video_rx()
+    p._lost = lambda why: None
+    fwd, sunk = _consumers(p)
+    for seq in range(100, 150):
+        p.datagram_received(_pkt(seq), p.remote_addr)
+    strays = [(149 + ahead + k) & 0xFFFF for k in range(n)]
+    for seq in strays:
+        p.datagram_received(_pkt(seq), p.remote_addr)
+    for seq in range(150, 400):
+        p.datagram_received(_pkt(seq), p.remote_addr)
+    followed = strays if n >= p.RESYNC_FAR else []
+    assert calls == fwd == sunk == list(range(100, 150)) + followed + list(range(150, 400))
+
+
+def test_a_sparse_burst_followed_leaves_room_to_go_back():
+    """A burst spread over FAR_AHEAD, one more stray, then the live stream: the
+    way back stays open for FAR_AHEAD packets past the newest stray, not past
+    the first."""
+    p, _, calls = _video_rx()
+    p._lost = lambda why: None
+    for seq in range(100, 150):
+        p.datagram_received(_pkt(seq), p.remote_addr)
+    n = p.RESYNC_FAR
+    strays = [749 + round(k * p.FAR_AHEAD / (n - 1)) for k in range(n)]
+    for seq in strays + [strays[-1] + 1]:
+        p.datagram_received(_pkt(seq), p.remote_addr)
+    for seq in range(150, 400):
+        p.datagram_received(_pkt(seq), p.remote_addr)
+    assert calls[-250:] == list(range(150, 400))  # all of the live stream, back in order
+
+
+def test_two_legs_on_one_ssrc_do_not_flip_the_stream_forever():
+    """Two legs on one SSRC, in runs long enough to move us once: after a jump we
+    undo, the next one needs twice as many in a row, so the flipping stops."""
+    p, _, calls = _video_rx()
+    p._lost = lambda why: None
+    run = p.RESYNC_FAR + 20
+    a, b = 1000, 9000
+    on_b = []
+    for _ in range(10):
+        for _ in range(run):
+            p.datagram_received(_pkt(a), p.remote_addr)
+            a += 1
+        for _ in range(run):
+            p.datagram_received(_pkt(b), p.remote_addr)
+            b += 1
+        on_b.append(calls[-1] == b - 1)
+    assert on_b == [True] + [False] * 9  # followed once, undone, never again
+    assert calls[-run:] == list(range(a - run, a))
+
+
+def test_old_packets_after_a_real_jump_do_not_take_us_back():
+    """Only the stream going on from where we jumped, before the new numbers go
+    on too, takes us back: late packets from before the jump, or the old numbers
+    once the new ones went on past a burst's reach, do not."""
+    p, _, calls = _video_rx()
+    p._lost = lambda why: None
+    for seq in range(100, 150):
+        p.datagram_received(_pkt(seq), p.remote_addr)
+    jump = list(range(5000, 5000 + p.RESYNC_FAR))
+    for seq in jump:
+        p.datagram_received(_pkt(seq), p.remote_addr)
+    for seq in range(120, 120 + p.RESYNC_BACK):  # stragglers from before the jump
+        p.datagram_received(_pkt(seq), p.remote_addr)
+    more = list(range(jump[-1] + 1, jump[-1] + p.FAR_AHEAD + 2))
+    for seq in more:
+        p.datagram_received(_pkt(seq), p.remote_addr)
+    for seq in range(150, 150 + p.RESYNC_BACK):  # the old numbers, now too late
+        p.datagram_received(_pkt(seq), p.remote_addr)
+    p.datagram_received(_pkt(more[-1] + 1), p.remote_addr)
+    assert calls == list(range(100, 150)) + jump + more + [more[-1] + 1]
+
+
+def test_av_goes_on_from_its_last_packet_across_a_jump():
+    """/av's ffmpeg drops anything behind the newest it saw: across a jump we
+    follow, or undo, it gets one continuous sequence. The panel's clock goes on
+    on the same SSRC, so the timestamps (audio sync) are left alone. A later
+    /av's GOP replay gets none of the strays."""
+    p, _, _ = _video_rx()
+    p._lost = lambda why: None
+    out = []
+    p.forward_av = True
+    p.ffmpeg_av_sock = type("S", (), {"sendto": lambda self, d, a: out.append(d)})()
+
+    def send(seq, nal=0x41):
+        rtp = _pkt(seq, nal=nal)
+        p.datagram_received(rtp[:4] + struct.pack("!I", 3000 * seq) + rtp[8:], p.remote_addr)
+    send(100, nal=0x65)
+    for seq in range(101, 150):
+        send(seq)
+    for seq in range(5000, 5000 + p.RESYNC_FAR):
+        send(seq)
+    for seq in range(150, 200):
+        send(seq)
+    assert [_seq_of(d) for d in out] == list(range(100, 100 + len(out)))
+    assert [struct.unpack_from("!I", d, 4)[0] for d in out][-50:] == [3000 * s for s in range(150, 200)]
+    assert all(_seq_of(d) < 5000 for d in p.gop_in_sequence_order())
+
+
+def test_av_goes_on_from_its_newest_packet_not_a_late_one(monkeypatch):
+    """A late packet still goes to /av (see below): the jump carries on from the
+    newest one ffmpeg got, or the whole replayed run would be "too late"."""
+    now = [100.0]
+    monkeypatch.setattr(mh.time, "monotonic", lambda: now[0])
+    p, _, _ = _video_rx()
+    p._lost = lambda why: None
+    fwd = []
+    p.forward_av = True
+    p.ffmpeg_av_sock = type("S", (), {"sendto": lambda self, d, a: fwd.append(_seq_of(d))})()
+    for seq in (1000, 1001, 1003):
+        p.datagram_received(_pkt(seq), p.remote_addr)
+    now[0] += p.REORDER_WAIT + 0.01
+    for seq in range(1004, 1100):
+        p.datagram_received(_pkt(seq), p.remote_addr)
+    p.datagram_received(_pkt(1002), p.remote_addr)  # late, still forwarded
+    for seq in range(1400, 1400 + p.RESYNC_FAR):
+        p.datagram_received(_pkt(seq), p.remote_addr)
+    assert fwd[-p.RESYNC_FAR :] == list(range(1100, 1100 + p.RESYNC_FAR))
+
+
+def test_copies_of_one_stray_do_not_move_the_stream():
+    """The relay repeats packets too: RESYNC_FAR copies of one stray are still
+    one packet, not a run."""
+    p, _, calls = _video_rx()
+    for seq in range(1000, 1010):
+        p.datagram_received(_pkt(seq), p.remote_addr)
+    for _ in range(p.RESYNC_FAR + 1):
+        p.datagram_received(_pkt(1600), p.remote_addr)
+    p.datagram_received(_pkt(1010), p.remote_addr)
+    assert calls == list(range(1000, 1011))
+
+
+def test_a_packet_late_for_the_reorder_buffer_still_reaches_av(monkeypatch):
+    """/av's ffmpeg waits up to -max_delay (300 ms) for a late packet, longer
+    than our REORDER_WAIT: it still gets one we gave up on. The sinks do not.
+    One older than FAR_AHEAD (an old keyframe resent) ffmpeg drops anyway."""
+    now = [100.0]
+    monkeypatch.setattr(mh.time, "monotonic", lambda: now[0])
+    p, _, _ = _video_rx()
+    fwd, sunk = _consumers(p)
+    p.datagram_received(_pkt(1000), p.remote_addr)
+    p.datagram_received(_pkt(1002), p.remote_addr)
+    now[0] += p.REORDER_WAIT + 0.01
+    p.datagram_received(_pkt(1003), p.remote_addr)   # 1001 given up
+    p.datagram_received(_pkt(1001), p.remote_addr)   # ...and here it is, 90 ms late
+    p.datagram_received(_pkt(700), p.remote_addr)
+    assert fwd == [1000, 1002, 1003, 1001]
+    assert sunk == [1000, 1002, 1003]
+
+
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg non installato")
 def test_rtp_h264_vero_di_ffmpeg_con_pacchetti_scambiati_e_ripetuti(tmp_path):
     """RTP H.264 prodotto da ffmpeg (FU-A), con due pacchetti scambiati e un

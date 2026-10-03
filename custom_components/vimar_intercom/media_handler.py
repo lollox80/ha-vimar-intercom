@@ -386,6 +386,18 @@ class RTPVideoProtocol(asyncio.DatagramProtocol):
     # 34 ms. A gap waits REORDER_WAIT, or until the buffer holds REORDER_BUF_SIZE packets.
     REORDER_BUF_SIZE = 512
     REORDER_WAIT = 0.08
+    # The cloud relay also sends isolated packets hundreds ahead on the same SSRC.
+    # Forwarded, ffmpeg (/av) takes one as the new head and drops the live stream
+    # as "too late" until it catches up, and the phone's libsrtp (HomeKit) refuses
+    # everything more than its 128-packet replay window behind it. So a packet more
+    # than FAR_AHEAD past the newest one is held back, unless RESYNC_FAR come in a
+    # row, FAR_AHEAD end to end at most (the relay reorders them too): then
+    # the source really jumped and we follow it from the first of them. RESYNC_BACK
+    # in a row back where we jumped from, before the new numbers go on, undo it.
+    FAR_AHEAD = 128
+    RESYNC_FAR = 50
+    RESYNC_BACK = 5
+    BACK_REORDER = 16  # the relay reorders by up to 15 places
 
     def __init__(self):
         self.transport = None
@@ -399,9 +411,9 @@ class RTPVideoProtocol(asyncio.DatagramProtocol):
         self.forward_av = False
         self.av_rtp = av_stream.AvRtp(3000)
         # Callables that receive every decrypted video RTP packet once, as it
-        # arrives: after the late filter, and without the duplicates of packets
-        # still waiting in the reorder buffer (the HomeKit doorbell sends these
-        # to the phone).
+        # arrives: after the late and far-ahead filters, and without the
+        # duplicates of packets still waiting in the reorder buffer (the HomeKit
+        # doorbell sends these to the phone).
         self.rtp_sinks: list = []
         # RTP dell'ultimo GOP (da SPS/PPS/IDR in poi): l'ffmpeg di /av parte dopo
         # il 200 OK (poll, avvio, 0,3 s) e l'RTP arrivato prima era perso; con
@@ -439,6 +451,11 @@ class RTPVideoProtocol(asyncio.DatagramProtocol):
         self._reorder_buf = {}  # seq -> payload
         self._gap_at = None     # when the gap the buffer waits for appeared
         self._next_seq = None   # next expected sequence number
+        self._top = None        # newest sequence number accepted
+        self._far_pkts = []     # packets far ahead in a row (_reorder args), held
+        self._back_to = None    # (_next_seq before the last jump ahead, _top after it),
+                                # until _top is FAR_AHEAD past the latter
+        self._undone = False    # a jump ahead undone on this SSRC
         self._ssrc = None       # SSRC del flusso che stiamo riordinando
         # Diagnostics
         self._srtp_fail = 0
@@ -505,11 +522,6 @@ class RTPVideoProtocol(asyncio.DatagramProtocol):
         else:
             return
 
-        # Forward decrypted RTP to the AV ffmpeg (MPEG-TS for HomeKit).
-        # Only when ffmpeg is up and listening — avoids sending to a dead port.
-        if self.forward_av:
-            self._forward_av(rtp)
-
         self.pkt_count += 1
         if self.pkt_count == 1:
             _LOGGER.info("First video RTP from %s (%dB)", addr, len(rtp))
@@ -557,12 +569,13 @@ class RTPVideoProtocol(asyncio.DatagramProtocol):
     def gop_in_sequence_order(self) -> list[bytes]:
         """The cached GOP in RTP sequence order.
 
-        _cache_gop runs before the reorder buffer, so _gop is in arrival
-        order. Replayed as is, ffmpeg takes the first packet as its reference
-        and drops every one before it ("RTP: dropping old packet received too
-        late"): an incomplete IDR and nothing decodable until the next
-        keyframe. The order is rebuilt around the first packet with a signed
-        16-bit distance, so a sequence wrap inside the group does not upset it.
+        _cache_gop runs after the late and far-ahead filters but before the
+        reorder buffer, so _gop is in arrival order. Replayed as is, ffmpeg
+        takes the first packet as its reference and drops every one before it
+        ("RTP: dropping old packet received too late"): an incomplete IDR and
+        nothing decodable until the next keyframe. The order is rebuilt around
+        the first packet with a signed 16-bit distance, so a sequence wrap
+        inside the group does not upset it.
         """
         packets = [p for p in self._gop or () if len(p) >= 12]
         if len(packets) < 2:
@@ -580,6 +593,11 @@ class RTPVideoProtocol(asyncio.DatagramProtocol):
         for rtp in self.gop_in_sequence_order():
             self._forward_av(rtp)
 
+    @staticmethod
+    def _ahead(a, b):
+        """How far sequence number a is ahead of b, in -0x7FFF..0x8000."""
+        return 0x8000 - ((b - a + 0x8000) & 0xFFFF)
+
     def _reorder(self, seq, ssrc, payload, rtp=b""):
         """Riordina i pacchetti UDP e li passa al depacketizer in sequenza.
 
@@ -591,29 +609,92 @@ class RTPVideoProtocol(asyncio.DatagramProtocol):
         Il GOP per il replay (`_cache_gop`) si riempie qui, DOPO lo stesso filtro:
         prima veniva prima, e un keyframe vecchio rimandato dalla 40515 azzerava
         `_gop`, che a ffmpeg arrivava «IDR vecchio a pezzi + P nuovi».
+        Lo stesso vale per un pacchetto più di FAR_AHEAD avanti al più nuovo (/av,
+        HomeKit e GOP non lo vedono), finché non ne arrivano RESYNC_FAR di fila.
         """
         if self._next_seq is not None:
             back = (self._next_seq - seq) & 0xFFFF  # 0 = atteso, 1..0x8000 = già passato
-            # Ripartito (encoder o relay riavviato) solo se cambia l'SSRC. La seq che
-            # torna indietro non basta: la 40515 rimanda pacchetti vecchi di un keyframe
-            # (103, 2, 104...); presi per un riavvio spostavano seq e timestamp di ~3 s
-            # verso ffmpeg e il muxer di HA falliva: video bianco.
-            if ssrc != self._ssrc:
-                _LOGGER.info("Video RTP ripartito (ssrc %08x→%08x, seq %d→%d): risincronizzo",
+            same = ssrc == self._ssrc
+            behind = same and 0 < back <= 0x8000
+            # The live stream goes on from where we left it (give or take the
+            # relay's reordering): older packets are late ones of a real jump.
+            # Once the new numbers went on past a burst's reach, the jump was real.
+            if self._back_to is not None and self._ahead(self._top, self._back_to[1]) > self.FAR_AHEAD:
+                self._back_to = None
+            back_again = (behind and self._back_to is not None
+                          and -self.BACK_REORDER <= self._ahead(seq, self._back_to[0]) <= self.FAR_AHEAD)
+            far = back_again or (same and self._ahead(seq, self._top) > self.FAR_AHEAD)
+            # Ripartito (encoder o relay riavviato) se cambia l'SSRC o dopo RESYNC_FAR
+            # pacchetti di fila molto avanti. La seq che torna indietro non basta: la
+            # 40515 rimanda pacchetti vecchi di un keyframe (103, 2, 104...); presi per
+            # un riavvio spostavano seq e timestamp di ~3 s verso ffmpeg e il muxer di
+            # HA falliva: video bianco.
+            if behind and not back_again:
+                # Duplicato o arrivato dopo che l'abbiamo dato per perso. ffmpeg (/av)
+                # aspetta fino a -max_delay (300 ms), più del nostro REORDER_WAIT:
+                # a lui serve ancora (un duplicato quasi sempre lo scarta). Più
+                # indietro di FAR_AHEAD lo scarterebbe comunque.
+                if self.forward_av and rtp and back <= self.FAR_AHEAD:
+                    self._forward_av(rtp)
+                return
+            if far:
+                held = self._far_pkts
+                if any(p[0] == seq for p in held):
+                    return  # a copy: still one packet
+                held.append((seq, ssrc, payload, rtp))
+                # FAR_AHEAD end to end at most: replayed from the lowest, none is far
+                # ahead of the newest before it, so none is held again.
+                span = [self._ahead(p[0], seq) for p in held]
+                while max(span) - min(span) > self.FAR_AHEAD:
+                    del held[0], span[0]  # scattered strays, not one stream that jumped
+                # Strays come alone or a few at a time (3 seen) and once followed /av
+                # and HomeKit keep them, hence many in a row (~0.5 s of video, replayed,
+                # not lost). Coming back is cheap; once we did, every later jump on
+                # this SSRC needs twice as many (once, not more): two legs on one SSRC
+                # flip us once per 2 * RESYNC_FAR packets at most.
+                if back_again:
+                    need = self.RESYNC_BACK
+                else:
+                    need = self.RESYNC_FAR * (2 if self._undone else 1)
+                if len(held) < need:
+                    return  # isolated, see FAR_AHEAD
+                self._lost(f"seq saltata da {self._next_seq} a {seq}")
+            if not same or far:
+                _LOGGER.info("Video RTP ripartito (%s: ssrc %08x→%08x, seq %d→%d): "
+                             "risincronizzo", "seq saltata" if far else "ssrc nuovo",
                              self._ssrc or 0, ssrc, self._next_seq, seq)
+                if not same:
+                    self._back_to, self._undone = None, False
                 self._reorder_buf.clear()
                 self._fua_buf = bytearray()
                 self._fua_started = False
                 self._fua_expected_seq = None
-                self._next_seq = None
-            elif 0 < back <= 0x8000:
-                return  # duplicato o arrivato dopo che l'abbiamo dato per perso
+                jumped_from, self._next_seq = self._next_seq, None
+                if far:  # the packets held so far start the new stream (an IDR's first fragments)
+                    self._far_pkts = []
+                    held.sort(key=lambda p: self._ahead(p[0], seq))
+                    self.av_rtp.follow(held[0][0])  # /av: one continuous sequence
+                    self._gop = self._gop_ts = None  # no strays in a later /av's replay
+                    for pkt in held:
+                        self._reorder(*pkt)
+                    if back_again:
+                        self._back_to = None
+                        self._undone = True
+                    else:
+                        self._back_to = (jumped_from, self._top)
+                    return
+        self._far_pkts.clear()
         if self._next_seq is None:
-            self._next_seq = seq
+            self._next_seq = self._top = seq
             self._ssrc = ssrc
-        # A duplicate of a packet still in the buffer was cached and forwarded
-        # the first time: only a new one goes to the cache and the taps.
+        elif (seq - self._top) & 0xFFFF < 0x8000:
+            self._top = seq
+        # Every consumer gets a packet once, after the filters above and as it
+        # arrives (no reorder delay; /av also gets the late ones, see above): a
+        # duplicate of one still in the buffer was sent the first time.
         if rtp and seq not in self._reorder_buf:
+            if self.forward_av:  # ffmpeg is up and listening (/av)
+                self._forward_av(rtp)
             self._cache_gop(rtp, payload)
             for sink in tuple(self.rtp_sinks):
                 try:
@@ -1036,6 +1117,7 @@ async def setup_media(remote_sdp, local_crypto_key=None, local_video_crypto_key=
         video_proto._reorder_buf = {}
         video_proto._gap_at = None
         video_proto._next_seq = None
+        video_proto._back_to, video_proto._undone = None, False
         video_proto._gop = video_proto._gop_ts = None
         video_proto._srtp_fail = 0
         video_proto._srtp_ok = 0
