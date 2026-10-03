@@ -271,8 +271,7 @@ class VimarIntercomCard extends CardAudio(HTMLElement) {
     this._icon(this._talk, ring ? "mdi:phone" : audioHint ? "mdi:volume-off"
       : on || !inCall ? "mdi:microphone" : "mdi:microphone-off");
     this._label(this._talk, ring ? "Rispondi" : audioHint ? "Audio" : inCall ? "Microfono" : "Parla");
-    this._talk.disabled = state === "offline" || (!window.isSecureContext && !ring)
-      || (state === "calling" && !on);
+    this._talk.disabled = state === "offline" || (state === "calling" && !on);
     this._shortcuts();
     this._syncSettings();
     this._histBtn.disabled = this._photo.disabled;
@@ -416,7 +415,7 @@ class VimarIntercomCard extends CardAudio(HTMLElement) {
       this._render();
     };
     this._err = $(".err");
-    this._hint = "";  // niente avviso permanente: in HTTP il microfono è semplicemente spento
+    this._hint = "";  // niente avviso permanente: in HTTP lo dice il tocco sul microfono
     this._view = $("#view");
     this._view.setAttribute("aria-label", "Vedi esterno");
     this._talk = $("#talk");

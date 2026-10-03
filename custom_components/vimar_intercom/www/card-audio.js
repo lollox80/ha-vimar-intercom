@@ -3,6 +3,17 @@
 
 const RATE = 8000;
 
+// Why the microphone failed, in words the user can act on. A denied permission is
+// usually the app's own (iOS asks once per app and never again), not the page's.
+const micError = (e) => {
+  if (["NotAllowedError", "SecurityError"].includes(e.name)) {
+    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    return ios ? "Permesso del microfono negato: Impostazioni → Home Assistant (o Safari) → Microfono."
+      : "Permesso del microfono negato: consentilo a questo sito o app.";
+  }
+  return `Audio non disponibile: ${e instanceof DOMException ? `${e.name}: ${e.message}` : e.message || e}`;
+};
+
 const CardAudio = (Base) => class extends Base {
   // Crea un AudioContext e prova a sbloccarlo (resume): se iOS lo tiene sospeso per
   // mancanza di un gesto vero, lo chiude, segnala _audioBlocked ("Microfono"/"Ascolta"
@@ -25,10 +36,18 @@ const CardAudio = (Base) => class extends Base {
   async _startTalk(auto = false) {
     this._stopListen();  // l'ascolto allo squillo lascia il posto all'audio vero (stesso canale)
     this._err.textContent = this._hint;
-    if (!window.isSecureContext) {  // solo "Rispondi": video sì, voce no
+    // No microphone API (HTTP, or a webview without it): "Rispondi" still answers with
+    // video only, and every tap says why there is no voice instead of doing nothing.
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
       if (auto) return;
-      this._mine = true;
-      await this._call("answer", this._talk).catch(() => {});
+      if (this._state === "ringing") {
+        this._mine = true;
+        await this._call("answer", this._talk).catch(() => {});
+      }
+      if (this._err.textContent === this._hint) {
+        this._err.textContent = window.isSecureContext ? "Microfono non disponibile in questa app o browser."
+          : "Microfono non disponibile: serve HTTPS (usa l'indirizzo https di Home Assistant).";
+      }
       return;
     }
     this._starting = true;  // doppio tocco durante il permesso: una chiamata sola
@@ -58,7 +77,7 @@ const CardAudio = (Base) => class extends Base {
       this._audioBlocked = false;
       await this._openAudio(mic, ctx);
     } catch (e) {
-      if (!auto && this._err.textContent === this._hint) this._err.textContent = `Audio non disponibile: ${e.message || e}`;
+      if (!auto && this._err.textContent === this._hint) this._err.textContent = micError(e);
       mic?.getTracks().forEach((t) => t.stop());  // il microfono non resta acceso
       if (!this._audio) ctx.close();
       this._stopAudio();

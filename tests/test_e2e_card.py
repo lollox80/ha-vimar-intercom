@@ -280,12 +280,53 @@ def test_rispondi_senza_https_solo_video(monkeypatch, engine):  # noqa: F811
                 rig.ring("ring-http")
                 await c.until("info().talk === 'Rispondi' && T.av.includes(200)")
                 await c.tap("talk")
-                await c.until("info().pill === 'In chiamata'")
+                await c.until("info().pill === 'In chiamata' && info().err.includes('HTTPS')")  # perché niente voce
                 assert (await c.T())["ws"] == 0 and (await c.info())["video"] == "live"
                 ok200 = await rig.peer.wait_for(is_(code=200, cid="ring-http"))
                 rig.peer.request("BYE", "ring-http", 2, "pnl", to_tag=ok200.h("to").split("tag=")[1])
                 await c.until(IDLE)
                 assert not (await c.T())["errors"]
+    run(s())
+
+
+MIC_OFF = "info().audio === 'off' && card.shadowRoot.getElementById('talk').getAttribute('aria-pressed') === 'false'"
+
+
+@pytest.mark.parametrize("insecure", [True, False])
+def test_microfono_senza_api_lo_dice(monkeypatch, insecure):
+    """Dal campo: HA aperta in HTTP (o una webview senza navigator.mediaDevices), tocco su
+    "Parla" e non succedeva niente. Ora il tocco dice perché, e non chiama la targa."""
+    async def s():
+        async with Rig(monkeypatch, http=True) as rig:
+            await rig.register()
+            async with Card(rig, "chromium", insecure=insecure, webcodecs=False) as c:
+                await c.until(IDLE)
+                await c.page.evaluate("Object.defineProperty(navigator, 'mediaDevices', { value: undefined })")
+                await c.tap("talk")
+                await c.until("info().err.startsWith('Microfono non disponibile')")
+                assert ("HTTPS" in (await c.info())["err"]) is insecure
+                assert await c.page.evaluate(MIC_OFF)
+                await asyncio.sleep(0.5)
+                assert not (await c.T())["calls"] and not rig.peer.got(is_("INVITE"))
+    run(s())
+
+
+@pytest.mark.parametrize("ios", [False, True])
+def test_microfono_permesso_negato_lo_dice(monkeypatch, ios):
+    """Dal campo: permesso del microfono negato all'app (iOS non lo richiede più). La card
+    dice dove riattivarlo, il tasto resta spento e la targa non viene chiamata."""
+    async def s():
+        async with Rig(monkeypatch, http=True) as rig:
+            await rig.register()
+            async with Card(rig, "chromium", webcodecs=False, query="&ios" if ios else "") as c:
+                await c.until(IDLE)
+                await c.page.evaluate("navigator.mediaDevices.getUserMedia = async () => {"
+                                      " throw new DOMException('denied', 'NotAllowedError'); }; 0")
+                await c.tap("talk")
+                await c.until("info().err.startsWith('Permesso del microfono negato')")
+                assert ("Impostazioni" in (await c.info())["err"]) is ios
+                assert await c.page.evaluate(MIC_OFF)
+                assert not (await c.T())["calls"] and not rig.peer.got(is_("INVITE"))
     run(s())
 
 
