@@ -1,0 +1,27 @@
+name: PR text
+
+# The changelog is written at release time from the "Changelog:" lines of the merged PRs
+# (CONTRIBUTING.md). This checks that every PR has them, and that they are well formed.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  changelog-lines:
+    name: Changelog lines
+    runs-on: ubuntu-latest
+    # In the merge queue there is no PR text to read: the check already passed on the PR.
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # The body goes through an environment variable, never into the script itself.
+      - run: python tools/pr_changelog.py
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}

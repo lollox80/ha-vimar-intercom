@@ -107,8 +107,11 @@ it is not obvious, a comment with the reason.
 - English for new code comments, docstrings, docs, commit messages and PR text. Existing
   Italian comments may stay. `README.it.md` stays Italian and is updated alongside `README.md`.
 - UI strings in sync across `strings.json`, `translations/en.json`, `translations/it.json`.
-- User-visible changes get an entry under `## [Unreleased]` in `CHANGELOG.md`
-  (Keep a Changelog format, newest on top).
+- PRs do not edit `CHANGELOG.md`: it is written at release time from the PR descriptions. Every PR has
+  one or more `Changelog: <section> - <what the user sees>` lines (Enhancements, Bug fixes,
+  Documentation, Security, Other changes) or `Changelog: none`, and a `Before you update: ...` line
+  when users must act after updating. `.github/pull_request_template.md` shows the format;
+  `tools/pr_changelog.py` checks it in CI (workflow "PR text").
 - `manifest.json` keys: `domain`, `name`, then alphabetical (hassfest rule, checked by
   `tests/test_manifest_order.py`). The only manifest requirement is `pycryptodome`
   (`requests` is used too, but ships with Home Assistant and hassfest rejects it in the manifest);
