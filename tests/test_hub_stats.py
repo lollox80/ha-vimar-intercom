@@ -143,11 +143,11 @@ def test_apri_porta_senza_target_usa_l_sga_configurato(hub, monkeypatch):
 
     inviati = []
 
-    async def _fake_msg(uri, body, extra_headers=None):
+    async def _fake_msg(uri, body, extra_headers=None, timeout=15):
         inviati.append((uri, body))
-        return True, "200"
+        return True, "200", 200
 
-    monkeypatch.setattr(hub_mod.sip, "do_system_message", _fake_msg)
+    monkeypatch.setattr(hub_mod.sip, "send_message", _fake_msg)
 
     asyncio.run(hub.async_door())
 

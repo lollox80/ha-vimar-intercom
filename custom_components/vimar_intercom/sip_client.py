@@ -1128,10 +1128,21 @@ async def do_register():
     return False
 
 
+NOT_SENT = 0  # send_message's code when nothing left (not registered)
+
+
 async def do_system_message(target_uri, body_text, extra_headers=None, timeout=15):
+    ok, msg, _ = await send_message(target_uri, body_text, extra_headers, timeout)
+    return ok, msg
+
+
+async def send_message(target_uri, body_text, extra_headers=None, timeout=15):
+    """do_system_message plus the final SIP code: NOT_SENT, or None when no final
+    answer came (timeout, or the signed MESSAGE failed mid-send): the MESSAGE may
+    still reach its target."""
     if not registered:
         _LOGGER.warning("do_system_message: not registered, target=%s body=%s", target_uri, body_text)
-        return False, "Non registrato"
+        return False, "Non registrato", NOT_SENT
     _LOGGER.info("do_system_message: target=%s body=%s headers=%s", target_uri, body_text, extra_headers)
     ftag = _gen("")
     # Come l'app ufficiale (MakeCallModel/SystemMsg): Call-ID = 10 caratteri alfanumerici
@@ -1168,22 +1179,26 @@ async def do_system_message(target_uri, body_text, extra_headers=None, timeout=1
         if code in (401, 407):
             ch = hdrs.get("proxy-authenticate", "") or hdrs.get("www-authenticate", "")
             if not ch:
-                return False, f"Auth vuoto ({code})"
+                return False, f"Auth vuoto ({code})", code
             _retry_auth(ch, 0, None)  # memorizza la sfida: gli INFO di keyframe partono autenticati
             auth = _make_auth("MESSAGE", target_uri, ch)
-            for r2 in await _send_request(_msg(auth=auth, seq=_next_cseq()), cid, timeout=timeout):
+            try:
+                answers = await _send_request(_msg(auth=auth, seq=_next_cseq()), cid, timeout=timeout)
+            except OSError as e:  # the signed MESSAGE may have left before the error
+                return False, f"Send failed after the 407: {e}", None
+            for r2 in answers:
                 c2 = _parse(r2)[0]
                 _LOGGER.info("do_system_message: auth response %s for %s", c2, target_uri)
                 if c2 and 200 <= c2 < 300:
-                    return True, f"OK ({c2})"
+                    return True, f"OK ({c2})", c2
                 if c2 and c2 >= 300:
-                    return False, f"Errore: {c2}"
-            return False, "Timeout"
+                    return False, f"Errore: {c2}", c2
+            return False, "Timeout", None
         if code and 200 <= code < 300:
-            return True, f"OK ({code})"
+            return True, f"OK ({code})", code
         if code and code >= 300:
-            return False, f"Errore: {code}"
-    return False, "Timeout"
+            return False, f"Errore: {code}", code
+    return False, "Timeout", None
 
 
 # do_call's result when answer_timeout ran out with no final answer. The

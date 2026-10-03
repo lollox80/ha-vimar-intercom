@@ -287,11 +287,11 @@ def test_async_door_senza_target_usa_la_targa_della_porta(monkeypatch):
     runtime.configure({**BASE, "sga_target": "61000", "door_target": "55001"})
     inviati = []
 
-    async def _fake(uri, body, extra_headers=None):
+    async def _fake(uri, body, extra_headers=None, timeout=15):
         inviati.append((uri, body, extra_headers))
-        return True, "200 OK"
+        return True, "200 OK", 200
 
-    monkeypatch.setattr(hub_mod.sip, "do_system_message", _fake)
+    monkeypatch.setattr(hub_mod.sip, "send_message", _fake)
     hub = hub_mod.VimarIntercomHub()
     monkeypatch.setattr(hub, "_touch", lambda: None)
 

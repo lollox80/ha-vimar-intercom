@@ -255,23 +255,113 @@ def test_a_failed_init_status_send_is_logged_and_retried_later(hub, monkeypatch,
 # ─── door, commands, probes ──────────────────────────────────────────────────
 
 def test_a_door_retry_that_fails_again_reports_the_second_failure(hub, monkeypatch):
-    answers = iter([(False, "408 Timeout"), (False, "503 Unavailable")])
+    answers = iter([(False, "500 Server Error", 500), (False, "503 Unavailable", 503)])
     sent = []
 
-    async def do_system_message(uri, body, extra_headers=None, timeout=15):
+    async def send_message(uri, body, extra_headers=None, timeout=15):
         sent.append(uri)
         return next(answers)
 
     async def do_register():
         return True
 
-    monkeypatch.setattr(sip, "do_system_message", do_system_message)
+    monkeypatch.setattr(sip, "send_message", send_message)
     monkeypatch.setattr(sip, "do_register", do_register)
     monkeypatch.setattr(R, "SIP_DOMAIN", "plant.example")
     ok, msg = asyncio.run(hub.async_door(target="55001"))
     assert (ok, msg) == (False, "503 Unavailable")
     assert sent == ["sip:55001@plant.example"] * 2
     assert hub.stats["door_count"] == 0 and hub.stats["last_door_result"] == "503 Unavailable"
+
+
+@pytest.mark.parametrize("first", [("Non registrato", 0), ("Errore: 503", 503)])
+def test_a_door_command_that_never_got_through_is_retried_over_the_cloud(hub, monkeypatch, first):
+    answers = iter([(False, *first), (True, "OK (200)", 200)])
+    sent = []
+
+    async def send_message(uri, body, extra_headers=None, timeout=15):
+        sent.append(timeout)
+        return next(answers)
+
+    async def do_register():
+        return True
+
+    monkeypatch.setattr(R, "USE_LOCAL_UDP", False)
+    monkeypatch.setattr(sip, "send_message", send_message)
+    monkeypatch.setattr(sip, "do_register", do_register)
+    assert asyncio.run(hub.async_door(target="55001")) == (True, "OK (200)")
+    assert sent == [hub_mod.DOOR_TLS_TIMEOUT] * 2
+    assert hub.stats["door_count"] == 1
+
+
+@pytest.mark.parametrize(
+    "first, result, sent_count",
+    [
+        ((False, "Errore: 408", 408), (True, "OK (200)"), 2),  # no relay on UDP: the door said no
+        ((False, "Errore: 504", 504), (True, "OK (200)"), 2),
+        ((True, "OK (202)", 202), (False, hub_mod.DOOR_QUEUED), 1),
+    ],
+)
+def test_on_local_udp_a_408_or_504_is_retried_and_a_202_is_not_an_open(hub, monkeypatch, first, result, sent_count):
+    answers = iter([first, (True, "OK (200)", 200)])
+    sent = []
+
+    async def send_message(uri, body, extra_headers=None, timeout=15):
+        sent.append(uri)
+        return next(answers)
+
+    async def do_register():
+        return True
+
+    monkeypatch.setattr(R, "USE_LOCAL_UDP", True)
+    monkeypatch.setattr(sip, "send_message", send_message)
+    monkeypatch.setattr(sip, "do_register", do_register)
+    assert asyncio.run(hub.async_door(target="55001")) == result
+    assert len(sent) == sent_count
+
+
+def test_a_second_door_command_while_one_is_in_flight_is_refused(hub, monkeypatch):
+    """A tap while the first command waits for the relay must not send a second copy."""
+    sent = []
+
+    async def send_message(uri, body, extra_headers=None, timeout=15):
+        sent.append(uri)
+        await asyncio.sleep(0.05)
+        return True, "OK (200)", 200
+
+    monkeypatch.setattr(sip, "send_message", send_message)
+
+    async def both():
+        return await asyncio.gather(hub.async_door(target="55001"), hub.async_door(target="55001"))
+
+    first, second = asyncio.run(both())
+    assert first[0] and second == (False, hub_mod.DOOR_BUSY)
+    assert len(sent) == 1 and hub.stats["door_count"] == 1
+    assert asyncio.run(hub.async_door(target="55001"))[0], "the guard is released afterwards"
+
+
+def test_a_cancelled_door_caller_keeps_the_guard_until_the_message_ends(hub, monkeypatch):
+    """An automation in restart mode cancels the first run mid-wait: the rerun must not send a copy."""
+    sent = []
+
+    async def send_message(uri, body, extra_headers=None, timeout=15):
+        sent.append(uri)
+        await asyncio.sleep(0.05)
+        return True, "OK (200)", 200
+
+    monkeypatch.setattr(sip, "send_message", send_message)
+
+    async def restart():
+        first = asyncio.ensure_future(hub.async_door(target="55001"))
+        await asyncio.sleep(0.01)
+        first.cancel()
+        second = await hub.async_door(target="55001")
+        await asyncio.sleep(0.1)
+        return second
+
+    assert asyncio.run(restart()) == (False, hub_mod.DOOR_BUSY)
+    assert len(sent) == 1 and hub.stats["door_count"] == 1
+    assert asyncio.run(hub.async_door(target="55001"))[0], "the guard is released afterwards"
 
 
 def test_a_command_that_raises_is_reported_as_a_failure(hub, monkeypatch):

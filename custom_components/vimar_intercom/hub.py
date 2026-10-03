@@ -107,6 +107,11 @@ def _uri_to_id(uri: str | None) -> str | None:
 
 
 MAX_CALL_DURATION = 300  # 5 minutes — auto-hangup safety net
+DOOR_TLS_TIMEOUT = 20  # door MESSAGE over the cloud: the relay answered after ~15.2 s in #14
+# Door results the UI shows after "Apertura non riuscita: ". Not retried: the relay may still deliver it.
+DOOR_QUEUED = "202, in coda sul relay: apertura non confermata"
+DOOR_UNCONFIRMED = "nessuna conferma dal relay, la porta potrebbe aprirsi lo stesso: attendi prima di riprovare"
+DOOR_BUSY = "un'altra apertura è in corso"
 
 # Interni interrogati con un OPTIONS all'avvio per farsi identificare dal
 # citofono quando il modello non è ancora noto (OPTIONS è innocuo: è lo stesso
@@ -130,6 +135,7 @@ class VimarIntercomHub(PlantMessages, RingMedia):
         self._last_ring_panel: str | None = None
         # Panels whose default door command was already logged (#58): once each.
         self._door_default_logged: set[str] = set()
+        self._door_lock = asyncio.Lock()
         self._video_end_callbacks: list[Callable] = []  # video finito: la camera ferma lo stream di HA
         self._state_callbacks: list[Callable] = []
         self._model_callbacks: list[Callable] = []
@@ -1040,6 +1046,18 @@ class VimarIntercomHub(PlantMessages, RingMedia):
             _LOGGER.warning("Hang-up: no end after %.0fs", HANGUP_BYE_TIMEOUT)
 
     async def async_door(self, target: str | None = None, command: str | None = None) -> tuple[bool, str]:
+        """One door command at a time, from any caller (card, lock, button, HomeKit):
+        a tap while one still waits for the relay (20 s or more) would send a second copy.
+        The command runs shielded: a cancelled caller (an automation in restart mode)
+        must not free the lock while the MESSAGE is still in flight."""
+        if self._door_lock.locked():
+            return False, DOOR_BUSY
+        await self._door_lock.acquire()  # free, so taken at once: no await before it
+        task = self._spawn(self._door(target, command), "door")
+        task.add_done_callback(lambda _: self._door_lock.release())
+        return await asyncio.shield(task)
+
+    async def _door(self, target: str | None, command: str | None) -> tuple[bool, str]:
         """Open door via SIP MESSAGE to targa (PE) address.
 
         From Tab5S rubrica ACTUATOR_LIST:
@@ -1066,8 +1084,7 @@ class VimarIntercomHub(PlantMessages, RingMedia):
 
         _LOGGER.info("Door command: uri=%s body=%s (%s) registered=%s", uri, body, source, sip.registered)
 
-        ok, msg = await sip.do_system_message(
-            uri, body, extra_headers={"Panda": "command"})
+        ok, msg, may_retry = await self._door_message(uri, body)
 
         self.stats["last_door_time"] = self._now()
         self.stats["last_door_target"] = door_target
@@ -1082,14 +1099,15 @@ class VimarIntercomHub(PlantMessages, RingMedia):
             _LOGGER.info("Door open OK: %s", msg)
             return ok, msg
 
+        if not may_retry:
+            return False, msg  # a second copy could open the door twice
 
         # Retry once after re-registration — handles stale connection
         _LOGGER.warning("Door command failed (%s), retrying after re-register...", msg)
         try:
             reg_ok = await sip.do_register()
             if reg_ok:
-                ok2, msg2 = await sip.do_system_message(
-                    uri, body, extra_headers={"Panda": "command"})
+                ok2, msg2, _ = await self._door_message(uri, body)
                 self.stats["last_door_result"] = msg2
                 if ok2:
                     self.stats["door_count"] += 1
@@ -1105,6 +1123,34 @@ class VimarIntercomHub(PlantMessages, RingMedia):
         except Exception as e:
             _LOGGER.error("Door retry error: %s", e)
             return False, str(e)
+
+    @staticmethod
+    async def _door_message(uri: str, body: str) -> tuple[bool, str, bool]:
+        """One door MESSAGE: (ok, msg, may_retry), may_retry False when a second copy
+        could open the door twice. A 202 is not an open door: real opens answer
+        200, the relay's 202 was only ever seen with no device behind it (#14).
+        Over the cloud no answer, a failed signed send, or a 408/504 from the
+        relay (forwarded, the door did not answer in time) may still reach the
+        door: the relay can answer late (#14: 202 after ~15.2 s). sip.NOT_SENT and
+        other final codes are retried."""
+        timeout = 15 if R.USE_LOCAL_UDP else DOOR_TLS_TIMEOUT  # 15: send_message's default
+        try:
+            ok, msg, code = await sip.send_message(uri, body, extra_headers={"Panda": "command"}, timeout=timeout)
+        except OSError as e:
+            # Retried. TLS: unsigned leg, assumes the relay always 407s it rather than forwarding.
+            # UDP: same exposure as the UDP timeout retry, accepted.
+            return False, str(e), True
+        if not R.USE_LOCAL_UDP and code in (None, 408, 504):
+            _LOGGER.warning("Door command to %s: %s, not retried: the relay may still deliver it", uri, msg)
+            return False, DOOR_UNCONFIRMED, False
+        if code == 202:
+            _LOGGER.warning(
+                "Door command to %s: the relay answered 202 Accepted (queued, no device confirmed "
+                "it), reported as not opened. If the door did open, please report it on GitHub.",
+                uri,
+            )
+            return False, DOOR_QUEUED, False
+        return ok, msg, True
 
     async def async_send_command(
         self,
