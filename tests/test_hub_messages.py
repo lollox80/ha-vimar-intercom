@@ -69,6 +69,8 @@ def test_calling_and_status_follow_the_sip_state(plain_hub, monkeypatch):
     monkeypatch.setattr(sip, "calling", True)
     assert plain_hub.calling is True and plain_hub.status == "calling"
     monkeypatch.setattr(sip, "registered", False)
+    assert plain_hub.status == "calling", "a lapsed registration does not hide a call"
+    monkeypatch.setattr(sip, "calling", False)
     assert plain_hub.status == "offline"
 
 

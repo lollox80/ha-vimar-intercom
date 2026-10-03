@@ -462,6 +462,11 @@ async def reconnect():
     return await asyncio.shield(_reconnect_started())
 
 
+def reconnecting() -> bool:
+    """A reconnect is running (the reader's, or the keepalive's)."""
+    return _reconnect_task is not None and not _reconnect_task.done()
+
+
 def cancel_reconnect() -> None:
     """Ferma la riconnessione in corso (unload dell'integrazione)."""
     if _reconnect_task:

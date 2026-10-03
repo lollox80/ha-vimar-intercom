@@ -325,16 +325,19 @@ class VimarIntercomHub(PlantMessages, RingMedia):
     @property
     def status(self) -> str:
         """Stato sintetico: offline / ringing / in_call / calling / idle."""
-        if not sip.registered:
-            return "offline"
         # In chiamata prima dello squillo: un INVITE che arriva a chiamata in corso
         # (l'eco della nostra) non deve trasformare "Microfono" in "Rispondi".
+        # "offline" solo dopo: una REGISTER di rinnovo fallita durante una chiamata
+        # o uno squillo non deve far sparire la chiamata (la card chiuderebbe media e
+        # microfono) mentre il media scorre ancora.
         if sip.in_call:
             return "in_call"
         if self.is_ringing:
             return "ringing"
         if sip.calling:
             return "calling"
+        if not sip.registered:
+            return "offline"
         return "idle"
 
     def set_ws_broadcast(self, fn: Callable):
@@ -374,6 +377,11 @@ class VimarIntercomHub(PlantMessages, RingMedia):
         solo in questi casi, altrimenti 503 subito."""
         return bool(self._call_in_view
                     or (self._has_ws_clients and self._has_ws_clients()))
+
+    @property
+    def call_active(self) -> bool:
+        """A call, an outgoing call or a ring is on: the SIP connection must not be dropped."""
+        return self._busy_now or self.is_ringing
 
     @property
     def is_ringing(self) -> bool:
@@ -1287,7 +1295,7 @@ class VimarIntercomHub(PlantMessages, RingMedia):
         sip.ringing() stays False, so nothing can answer it (the away message
         only runs for a real INVITE) and a real ring is not refused as busy.
         Not in the ring log or the stats: there is no visitor, photo or clip."""
-        if self.is_ringing or sip.in_call or sip.calling or self._busy_now:
+        if self.call_active:
             return False
         self._sim_ring = self._spawn(self._simulated_ring(duration), "simulated ring")
         self._was_ringing = True
@@ -1639,6 +1647,16 @@ class VimarIntercomHub(PlantMessages, RingMedia):
         _LOGGER.info("SIP re-registration after the options test: %s", "OK" if ok else "FAILED")
         return ok
 
+    async def _register_or_join_reconnect(self) -> bool:
+        """REGISTER during a call; if the reader is already reconnecting, join it
+        instead: a REGISTER now would open a second connection beside it."""
+        if not sip.reconnecting():
+            return await sip.do_register()
+        ok = await sip.reconnect()
+        if ok:
+            self._init_status_sent = False  # back after a drop: ask the Tab's state again
+        return ok
+
     async def _keepalive_tick(self):
         """Un giro di keepalive. Separato dal loop per poterlo testare."""
         try:
@@ -1649,13 +1667,13 @@ class VimarIntercomHub(PlantMessages, RingMedia):
                 if not ok:
                     self.stats["register_failures"] += 1
                     failed = True
-                if not ok and (sip.in_call or sip.calling):
+                if not ok and self.call_active:
                     # A reconnect would tear down the connection the live call
-                    # runs on for one lost REGISTER answer. Retry the REGISTER
-                    # once; if the connection is really gone the reader notices
-                    # and reconnects on its own.
-                    _LOGGER.warning("SIP re-registration failed during a call: retrying once")
-                    ok = await sip.do_register()
+                    # (or the ring, on TLS) runs on for one lost REGISTER answer.
+                    # Retry the REGISTER once; if the connection is really gone
+                    # the reader notices and reconnects on its own.
+                    _LOGGER.warning("SIP re-registration failed during a call or ring: retrying once")
+                    ok = await self._register_or_join_reconnect()
                 elif not ok:
                     # We were registered and the renewal failed: reconnect now,
                     # not a whole keepalive interval later with the intercom
@@ -1666,6 +1684,10 @@ class VimarIntercomHub(PlantMessages, RingMedia):
                     if ok:
                         self._init_status_sent = False
                         _LOGGER.info("Registrazione SIP recuperata")
+            elif self.call_active:
+                # Lapsed mid-call: never start a reconnect (on TLS it closes the call's connection).
+                # Bounded: a ring ends in 90 s, a call in 5 minutes, then the else branch reconnects.
+                ok = await self._register_or_join_reconnect()
             else:
                 # Fino alla 1.0.5 questo ramo non esisteva: la guardia era
                 # `if sip.registered`, quindi persa la registrazione il loop
