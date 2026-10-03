@@ -166,6 +166,67 @@ def test_a_jump_past_half_a_wrap_at_roc_0_moves_the_window_after_a_longer_run():
     assert rx.resyncs == 1
 
 
+def test_a_jump_at_roc_0_that_wraps_before_the_window_follows_loses_nothing():
+    """The wrap comes 36 packets after the jump, before the run moves the window:
+    the packets after it authenticate at the ROC of the run, not of the window."""
+    tx, rx = _ctx(), _ctx()
+    assert _lost(tx, rx, [*range(1000, 1100), *range(65500, 67000)]) == []
+    assert rx.resyncs == 1
+
+
+def test_a_stray_after_the_wrap_does_not_cut_off_an_unconfirmed_jump():
+    """The old leg sends one more packet just after the jump wrapped, before
+    its run moved the window: the stream after it goes on."""
+    tx, old, rx = _ctx(), _ctx(), _ctx()
+    assert _lost(tx, rx, [*range(1000, 1100), *range(65500, 65546)]) == []  # a run of 46
+    assert rx.unprotect(old.protect(_rtp(1300))) is not None
+    assert _lost(tx, rx, range(65546, 66500)) == []
+
+
+def test_strays_in_a_row_do_not_move_the_window_past_a_reordered_stream():
+    """Three strays 20000 ahead, then a keyframe burst arriving in reverse
+    order, as the 40515 relay reorders video: the window stays on the stream."""
+    tx, far, rx = _ctx(), _ctx(), _ctx()
+    assert _lost(tx, rx, range(1000, 1300)) == []
+    assert _lost(far, rx, range(21300, 21303)) == []
+    assert _lost(tx, rx, [*range(1315, 1299, -1), *range(1316, 1400)]) == []
+    assert rx.resyncs == 0
+
+
+def test_a_sequence_restarted_lower_and_reordered_resyncs_after_three():
+    tx, rx = _ctx(), _ctx()
+    assert _lost(tx, rx, range(1000, 1300)) == []
+    swapped = [seq ^ 1 for seq in range(4, 300)]  # 5, 4, 7, 6, ...
+    assert _lost(tx, rx, swapped) == [5, 4, 7, 6] and rx.resyncs == 1
+
+
+def test_a_stale_far_packet_does_not_hold_back_a_later_restart():
+    """A stray left behind early in the call is no run: a restart just under it
+    resyncs after three as usual."""
+    tx, rx = _ctx(), _ctx()
+    assert _lost(tx, rx, range(30000, 30300)) == []
+    assert _lost(tx, rx, [10050]) == [10050]
+    assert _lost(tx, rx, range(30300, 30400)) == []
+    assert _lost(tx, rx, range(10000, 11000)) == [10000, 10001] and rx.resyncs == 1
+
+
+def test_old_packets_from_before_the_wrap_sent_again_are_refused():
+    """With a stray early in the call pending, three packets captured before
+    the first wrap, sent again, must not authenticate at the next ROC try and
+    move the window back, where the live stream would fail from then on."""
+    tx, far, rx = _ctx(), _ctx(), _ctx()
+    assert _lost(tx, rx, range(1000, 1100)) == []
+    assert rx.unprotect(far.protect(_rtp(4001))) is not None
+    caught = {}
+    for idx in range(1100, 70000):
+        pkt = tx.protect(_rtp(idx & 0xFFFF))
+        if idx in (4100, 4150, 4200):
+            caught[idx] = pkt
+        assert rx.unprotect(pkt) is not None, idx
+    assert [rx.unprotect(pkt) for pkt in caught.values()] == [None] * 3
+    assert _lost(tx, rx, range(70000, 70100)) == [] and rx.resyncs == 0
+
+
 def test_a_stray_and_a_jump_after_the_first_wrap_lose_nothing():
     tx, far, rx = _ctx(), _ctx(), _ctx()
     for seq in (30000, 60000, 0, 10000):  # the stray's sender, at ROC 1

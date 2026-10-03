@@ -94,11 +94,11 @@ class SRTPContext:
     AUTH_TAG_LEN = 10  # 80-bit HMAC-SHA1
     #: Received indices remembered per SSRC for replay protection (libsrtp keeps 128).
     REPLAY_WINDOW = 128
-    #: Consecutive authentic packets far from the window that move it there.
+    #: Authentic packets far behind the window, one after the other (reordering
+    #: allowed), that move it there.
     RESYNC_RUN = 3
-    #: The same, half a wrap or more ahead (~1 s of audio); <= REPLAY_WINDOW, as
-    #: the run that went through is marked in the window.
-    RESYNC_RUN_PAST_HALF_WRAP = 50
+    #: The same, far ahead (~1 s of audio).
+    RESYNC_RUN_AHEAD = 50
 
     def __init__(self, master_key_b64: str, suite: str = "AES_CM_128_HMAC_SHA1_80", name: str = ""):
         """Initialize from base64-encoded inline key (30 bytes = 16 key + 14 salt).
@@ -151,9 +151,10 @@ class SRTPContext:
 
         Inside the window: refused if already received. A whole window or more
         away it stays put: a packet ahead goes through once, one behind is
-        refused, and RESYNC_RUN in a row move the window there (a real jump, or
-        a sender restarting lower, which loses RESYNC_RUN - 1 packets). One stray
-        far ahead on a cloud ring used to move it and stall the live stream."""
+        refused. A run of them moves the window there: RESYNC_RUN_AHEAD for a
+        real jump, RESYNC_RUN for a sender restarting lower, which loses
+        the packets before the move. One stray far ahead on a cloud ring used to
+        move it and stall the live stream."""
         w = self._rx_window.get(ssrc)
         if w is None:
             self._rx_window[ssrc] = _Window(idx, 1)
@@ -168,20 +169,23 @@ class SRTPContext:
                 w = w._replace(seen=w.seen | 1 << behind)
             self._rx_window[ssrc] = w._replace(run=0)  # the run is broken
             return True
-        # ponytail: only the last far packet is remembered per SSRC, so two
-        # strays ahead sent in turn go through every time. A small set of
-        # recent far indices if a resync log ever shows that.
+        # ponytail: only the highest far packet is remembered per SSRC, so far
+        # ahead the others (strays sent in turn, a run's late packets) go
+        # through again if sent again. A second window for the run if a resync
+        # log ever shows that.
         if idx == w.far:
             return False  # the same far packet again
-        # ponytail: RESYNC_RUN captured consecutive packets resync backwards,
+        # ponytail: RESYNC_RUN captured packets in order resync backwards,
         # indistinguishable from a sender restarting with the same key. Make it
         # forward-only if the resync warning only ever shows jumps ahead.
-        run = w.run + 1 if w.far is not None and idx == w.far + 1 else 1
-        # Half a wrap or more ahead only authenticates at ROC 0, where the
-        # estimate cannot try the ROC below. Once the window (and so the
-        # estimate) is there, the stream behind it no longer would: ask for a
-        # longer run: a real jump or a long loss goes on.
-        need = self.RESYNC_RUN if behind > -0x8000 else self.RESYNC_RUN_PAST_HALF_WRAP
+        d = idx - w.far if w.far is not None else 0
+        if w.run and -self.REPLAY_WINDOW < d < 0:
+            return behind < 0  # a late packet of the run: the run goes on
+        # One that overtakes the run counts, even out of order. Ahead they go
+        # through while it is confirmed, so it can be long: a few strays in a
+        # row must not move the window off a live stream.
+        run = w.run + 1 if 0 < d < self.REPLAY_WINDOW else 1
+        need = self.RESYNC_RUN if behind > 0 else self.RESYNC_RUN_AHEAD
         if run < need:
             self._rx_window[ssrc] = w._replace(far=idx, run=run)
             if behind < 0 and not self._far_ahead_logged:
@@ -192,8 +196,7 @@ class SRTPContext:
         if self.resyncs == 1:
             _LOGGER.warning("SRTP %s: packet numbers %s %d, replay window moved there after %d in a row",
                             self.name, "jumped ahead" if behind < 0 else "went back", abs(behind), run)
-        # ahead, the run went through; behind, only this one
-        self._rx_window[ssrc] = _Window(idx, (1 << run) - 1 if behind < 0 else 1)
+        self._rx_window[ssrc] = _Window(idx, 1)
         return True
 
     def _compute_iv(self, ssrc: int, packet_index: int) -> bytes:
@@ -233,7 +236,14 @@ class SRTPContext:
         # Verify auth tag with estimated ROC
         expected_tag = self._compute_auth_tag(authenticated_portion, est_roc)
         if not hmac.compare_digest(auth_tag, expected_tag):
-            return None
+            # A run ahead not confirmed yet may have wrapped: the next ROC.
+            # Only ahead: behind, old packets from before a wrap would get in.
+            if w is None:
+                return None
+            idx = (est_roc + 1) << 16 | seq
+            if idx <= w.top or not hmac.compare_digest(
+                    auth_tag, self._compute_auth_tag(authenticated_portion, est_roc + 1)):
+                return None
 
         # Auth passed: a captured packet sent again is dropped here
         if not self._is_fresh(ssrc, idx):

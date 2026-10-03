@@ -191,7 +191,7 @@ def test_a_window_jump_is_logged_once_per_call_with_its_size(caplog, monkeypatch
     logged = [(r.levelno, r.getMessage()) for r in caplog.records if "SRTP video" in r.getMessage()]
     assert [lvl for lvl, _ in logged] == [logging.INFO, logging.WARNING]
     assert "3999 ahead" in logged[0][1] and "went back 1387" in logged[1][1]
-    assert rx.resyncs == 2 and rx.replayed == 2
+    assert rx.resyncs == 1 and rx.replayed == 2  # 2000.. is ahead: it passes, a run of 50 would move it
 
 
 def test_a_duplicate_srtp_audio_packet_is_a_replay_not_an_auth_failure(caplog):
