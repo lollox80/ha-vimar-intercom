@@ -31,7 +31,7 @@ cd ha-vimar-intercom
 pip install -r requirements-dev.txt
 ```
 
-Targets: Home Assistant **2024.1+**, Python **3.11+** (HA ships 3.11/3.12/3.13).
+Targets: Home Assistant **2025.10+**, Python **3.13+** (what HA 2025.10 ships; CI also runs 3.14).
 
 Runtime dependencies are deliberately minimal: `pycryptodome` and `requests` (the latter ships
 with Home Assistant, so only `pycryptodome` is listed in the manifest).

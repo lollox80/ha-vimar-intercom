@@ -1,6 +1,6 @@
 # Vimar Intercom — Integrazione Home Assistant
 
-[![HACS](https://img.shields.io/badge/HACS-Custom-orange?style=for-the-badge)](https://hacs.xyz/docs/faq/custom_repositories/) [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.7%2B-41BDF5?style=for-the-badge&logo=home-assistant&logoColor=white)](https://www.home-assistant.io/) [![Tests](https://img.shields.io/github/actions/workflow/status/lollox80/ha-vimar-intercom/validate.yml?branch=main&label=tests&style=for-the-badge)](https://github.com/lollox80/ha-vimar-intercom/actions/workflows/validate.yml) [![Last commit](https://img.shields.io/github/last-commit/lollox80/ha-vimar-intercom?style=for-the-badge)](https://github.com/lollox80/ha-vimar-intercom/commits/main) [![License](https://img.shields.io/github/license/lollox80/ha-vimar-intercom?style=for-the-badge)](https://github.com/lollox80/ha-vimar-intercom/blob/main/LICENSE)
+[![HACS](https://img.shields.io/badge/HACS-Custom-orange?style=for-the-badge)](https://hacs.xyz/docs/faq/custom_repositories/) [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.10%2B-41BDF5?style=for-the-badge&logo=home-assistant&logoColor=white)](https://www.home-assistant.io/) [![Tests](https://img.shields.io/github/actions/workflow/status/lollox80/ha-vimar-intercom/validate.yml?branch=main&label=tests&style=for-the-badge)](https://github.com/lollox80/ha-vimar-intercom/actions/workflows/validate.yml) [![Last commit](https://img.shields.io/github/last-commit/lollox80/ha-vimar-intercom?style=for-the-badge)](https://github.com/lollox80/ha-vimar-intercom/commits/main) [![License](https://img.shields.io/github/license/lollox80/ha-vimar-intercom?style=for-the-badge)](https://github.com/lollox80/ha-vimar-intercom/blob/main/LICENSE)
 
 [![Apri il tuo Home Assistant e questo repository in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=lollox80&repository=ha-vimar-intercom&category=integration)
 
@@ -38,7 +38,7 @@ Cosa cambia da un impianto all'altro: [Configurazione](https://github.com/lollox
 4. In **Configura** scarica la rubrica del tuo impianto (dal citofono, dal cloud Vimar o da un file
    `rubrica.db`): imposta la porta, gli attuatori e gli indirizzi a cui vanno i comandi.
 
-Serve Home Assistant 2024.7 o successivo e ffmpeg sull'host. Installazione manuale, tutte le opzioni e
+Serve Home Assistant 2025.10 o successivo e ffmpeg sull'host. Installazione manuale, tutte le opzioni e
 la rubrica: [Configurazione](https://github.com/lollox80/ha-vimar-intercom/blob/main/docs/CONFIGURATION.it.md).
 
 ## Cosa ottieni

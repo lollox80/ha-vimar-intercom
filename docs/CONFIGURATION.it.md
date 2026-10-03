@@ -4,7 +4,7 @@
 
 ## Requisiti
 
-- Home Assistant **2024.7** o successivo, Python 3.12+ (quello di HA 2024.7).
+- Home Assistant **2025.10** o successivo, Python 3.13+ (quello di HA 2025.10).
 - ffmpeg sull'host HA (dipendenza dichiarata nel manifest) per la camera.
 - Il **QR di abbinamento** dell'impianto Vimar (dall'app VIEW) **oppure** i parametri SIP manuali
   (id, password, domain, cloud proxy).

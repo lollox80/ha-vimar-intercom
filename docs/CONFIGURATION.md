@@ -4,7 +4,7 @@
 
 ## Requirements
 
-- Home Assistant **2024.7** or later, Python 3.12+ (what HA 2024.7 ships).
+- Home Assistant **2025.10** or later, Python 3.13+ (what HA 2025.10 ships).
 - ffmpeg on the Home Assistant host (declared in the manifest) for the camera.
 - The plant's **pairing QR code** (from the VIEW app) **or** the SIP parameters entered by hand
   (id, password, domain, cloud proxy).

@@ -1,6 +1,6 @@
 # Vimar Intercom — Home Assistant integration
 
-[![HACS](https://img.shields.io/badge/HACS-Custom-orange?style=for-the-badge)](https://hacs.xyz/docs/faq/custom_repositories/) [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.7%2B-41BDF5?style=for-the-badge&logo=home-assistant&logoColor=white)](https://www.home-assistant.io/) [![Tests](https://img.shields.io/github/actions/workflow/status/lollox80/ha-vimar-intercom/validate.yml?branch=main&label=tests&style=for-the-badge)](https://github.com/lollox80/ha-vimar-intercom/actions/workflows/validate.yml) [![Last commit](https://img.shields.io/github/last-commit/lollox80/ha-vimar-intercom?style=for-the-badge)](https://github.com/lollox80/ha-vimar-intercom/commits/main) [![License](https://img.shields.io/github/license/lollox80/ha-vimar-intercom?style=for-the-badge)](https://github.com/lollox80/ha-vimar-intercom/blob/main/LICENSE)
+[![HACS](https://img.shields.io/badge/HACS-Custom-orange?style=for-the-badge)](https://hacs.xyz/docs/faq/custom_repositories/) [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.10%2B-41BDF5?style=for-the-badge&logo=home-assistant&logoColor=white)](https://www.home-assistant.io/) [![Tests](https://img.shields.io/github/actions/workflow/status/lollox80/ha-vimar-intercom/validate.yml?branch=main&label=tests&style=for-the-badge)](https://github.com/lollox80/ha-vimar-intercom/actions/workflows/validate.yml) [![Last commit](https://img.shields.io/github/last-commit/lollox80/ha-vimar-intercom?style=for-the-badge)](https://github.com/lollox80/ha-vimar-intercom/commits/main) [![License](https://img.shields.io/github/license/lollox80/ha-vimar-intercom?style=for-the-badge)](https://github.com/lollox80/ha-vimar-intercom/blob/main/LICENSE)
 
 [![Open your Home Assistant instance and open this repository in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=lollox80&repository=ha-vimar-intercom&category=integration)
 
@@ -38,7 +38,7 @@ What changes from one plant to another: [Configuration](https://github.com/lollo
 4. In **Configure**, get your plant's phonebook (from the intercom, from the Vimar cloud, or a
    `rubrica.db` file): it sets the door, the actuators and the addresses the commands go to.
 
-Requires Home Assistant 2024.7 or later and ffmpeg on the host. Manual installation, every option and
+Requires Home Assistant 2025.10 or later and ffmpeg on the host. Manual installation, every option and
 the phonebook: [Configuration](https://github.com/lollox80/ha-vimar-intercom/blob/main/docs/CONFIGURATION.md).
 
 ## What you get

@@ -2,7 +2,7 @@
 name = "vimar-intercom-dev"
 version = "0.0.0"
 description = "Tooling di sviluppo per l'integrazione HA vimar_intercom (non è il pacchetto HA)"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -16,14 +16,14 @@ markers = [
 
 [tool.ruff]
 line-length = 120
-target-version = "py311"
+target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
 ignore = ["E501"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.13"
 ignore_missing_imports = true
 
 [tool.coverage.run]
